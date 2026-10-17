@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, hashPassword, comparePasswords } from "./auth";
 import { registerPasswordResetRoutes } from "./passwordReset";
+import { longTermStatsService, LONG_TERM_DAYS } from "./longTermStatsService";
+import { statisticalAnalysisService } from "./statisticalAnalysisService";
 import { registerPaymentRoutes, isPaywallOn } from "./payments";
 import { registerReferralRoutes, usableCredits } from "./referrals";
 import { insertSubscriptionSchema, insertFeedbackSchema, insertPredictionSchema, insertWatchlistSchema } from "@shared/schema";
@@ -336,7 +338,7 @@ export function registerRoutes(app: Express): Server {
         return res.status(503).json({ message: `Live market data for "${upperSymbol}" is currently unavailable.`, error: "QUOTE_UNAVAILABLE", symbol: upperSymbol });
       }
       const currentPrice = realTimeQuote.lastPrice;
-      const historicalData = await stockDataService.getHistoricalData(upperSymbol, 30);
+      const historicalData = await stockDataService.getHistoricalData(upperSymbol, LONG_TERM_DAYS);
       
       // ★ Calculate time-based risk multiplier
       const riskMultiplier = getTimeScaledRiskMultiplier(whenDate, req.body.riskLevel || 'medium', true);
@@ -406,7 +408,7 @@ export function registerRoutes(app: Express): Server {
       
       const isDevMode = process.env.NODE_ENV === 'development';
       const showAstroDetails = isDevMode && req.user?.role === 'developer';
-      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astrologyBias: realTimeQuote.astrologyBias || 0, horaInfluence: realTimeQuote.horaInfluence, astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
+      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astrologyBias: realTimeQuote.astrologyBias || 0, horaInfluence: realTimeQuote.horaInfluence, astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
       
       const statisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Standard technical analysis applied';
       const astroReasoning = enhancedPrediction.astroRecommendation || (enhancedPrediction.warnings?.length > 0 ? enhancedPrediction.warnings.join('; ') : null);
@@ -874,6 +876,21 @@ export function registerRoutes(app: Express): Server {
       res.json(await astrologyService.getCurrentAstrology(new Date(), location));
     } catch (error) {
       res.status(500).json({ message: 'Error fetching astrology data' });
+    }
+  });
+
+  // 20-year statistical analysis for a stock (also used by the prediction pipeline)
+  app.get('/api/stock/:symbol/stats', isAuthenticated, async (req, res) => {
+    try {
+      const symbol = String(req.params.symbol).toUpperCase();
+      const target = parseWhen(req.query.when as string) ?? new Date(Date.now() + 30 * 86400000);
+      const raw = await stockDataService.getHistoricalData(symbol, LONG_TERM_DAYS);
+      const bars = statisticalAnalysisService.normalizeYahooData(raw);
+      const result = longTermStatsService.analyze(symbol, bars, target);
+      if (!result) return res.status(404).json({ message: 'Not enough price history (need at least ~1 year) for statistical analysis.' });
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: 'Error running statistical analysis' });
     }
   });
 

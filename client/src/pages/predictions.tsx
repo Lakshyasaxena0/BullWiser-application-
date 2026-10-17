@@ -17,6 +17,7 @@ import {
   AlertCircle, Info,
 } from "lucide-react";
 import { useLocation } from "wouter";
+import LongTermStatsCard from "@/components/LongTermStatsCard";
 import VedicInsightsCard from "@/components/VedicInsightsCard";
 import FeedbackForm from "@/components/dashboard/feedback-form";
 
@@ -474,6 +475,7 @@ export default function Predictions() {
                           </div>
                         )}
 
+                        <LongTermStatsCard stats={predResult.longTermStats} />
                         <VedicInsightsCard vedic={predResult.vedic} />
 
                         {/* ── AI Conclusion: Groq studied the statistics + astrology, using weights learned from past results ── */}

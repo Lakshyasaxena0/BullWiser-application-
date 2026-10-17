@@ -10,6 +10,7 @@ import { learningService, type LearningProfile } from './learningService';
 import { stockDataService }          from './stockDataService';
 import { feedbackLearningService, NEUTRAL_LEARNING_ADJUSTMENT } from './feedbackLearningService';
 import { astrologyService }          from './astrologyService';
+import { longTermStatsService, LongTermStats } from './longTermStatsService';
 import { advancedAstrologyService }  from './advancedAstrologyService';
 import { statisticalAnalysisService, type StatisticalAnalysisResult } from './statisticalAnalysisService';
 
@@ -239,11 +240,23 @@ Return JSON:
 
     // ── Step 2: Statistical analysis (50% weight) ─────────────────────────
     let statsResult: StatisticalAnalysisResult | null = null;
+    let longTermStats: LongTermStats | null = null;
     try {
-      const bars = statisticalAnalysisService.normalizeYahooData(historicalData || []);
+      const allBars = statisticalAnalysisService.normalizeYahooData(historicalData || []);
+      const bars = allBars.slice(-500); // indicators (RSI/MACD/BB/S-R) look at the last ~2 years
       if (bars.length >= 10) {
         statsResult = statisticalAnalysisService.analyzeHistoricalData(symbol, bars);
         console.log(`[Stats] ${symbol}: score=${statsResult?.statisticalScore}, signal=${statsResult?.statisticalSignal}, bars=${bars.length}`);
+        // 20-year layer: long-run profile, seasonality, analog forward returns, walk-forward backtest
+        longTermStats = longTermStatsService.analyze(symbol, allBars, targetDate);
+        if (longTermStats && statsResult && longTermStats.reliable) {
+          const blended = Math.round(statsResult.statisticalScore * 0.5 + longTermStats.score * 0.5);
+          statsResult.statisticalScore = blended;
+          statsResult.statisticalSignal = blended > 60 ? 'bullish' : blended < 40 ? 'bearish' : 'neutral';
+          statsResult.keyFindings = [...longTermStats.keyFindings.slice(0, 3), ...(statsResult.keyFindings ?? [])];
+          statsResult.keyRisks = [...longTermStats.keyRisks, ...(statsResult.keyRisks ?? [])];
+          console.log(`[Stats] ${symbol}: 20y layer score=${longTermStats.score} (${longTermStats.yearsOfData}y, hit-rate ${longTermStats.backtest.hitRatePct}%) → blended ${blended}`);
+        }
       } else {
         console.log(`[Stats] Not enough bars for ${symbol}: ${bars.length}`);
       }
@@ -342,6 +355,7 @@ Return JSON:
           nearestResistance: statsResult.supportResistance.nearestResistance,
           dailyVolatilityPct: statsResult.volatility.dailyVolatility,
           barsAnalysed: statsResult.analysedBars,
+          ...(longTermStats ? { longTerm20y: { years: longTermStats.yearsOfData, score: longTermStats.score, probUpPct: longTermStats.forecast.probUpPct, medianReturnPct: longTermStats.forecast.medianReturnPct, p10: longTermStats.forecast.p10ReturnPct, p90: longTermStats.forecast.p90ReturnPct, backtestHitRatePct: longTermStats.backtest.hitRatePct, cagrPct: longTermStats.profile.cagrPct, maxDrawdownPct: longTermStats.profile.maxDrawdownPct, seasonality: longTermStats.seasonality } } : {}),
         },
         aiReading: aiStatsAnalysis ? {
           direction: aiStatsAnalysis.direction,
@@ -403,6 +417,7 @@ Return JSON:
 
     // ── Step 9: Metadata ─────────────────────────────────────────────────
     finalPrediction.vedic = astroPrediction?.vedic ?? null;
+    finalPrediction.longTermStats = longTermStats;
     finalPrediction.metadata = {
       aiEnabled:            aiStatsAnalysis !== null || aiConclusion !== null,
       aiSynthesisEnabled:   aiConclusion !== null,

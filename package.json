@@ -16,7 +16,8 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "test": "node test-ai-training.js",
-    "test:vedic": "tsx server/vedic/selfTest.ts"
+    "test:vedic": "tsx server/vedic/selfTest.ts",
+    "test:stats": "tsx server/longTermSelfTest.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

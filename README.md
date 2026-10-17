@@ -37,5 +37,8 @@ Local: `cd desktop && npm install && npm run dist`. Electron 22 is the last vers
 ## Astrology engine (`server/vedic/`)
 Real sidereal (Lahiri) planetary positions from `astronomy-engine`, real panchang (tithi, nakshatra, yoga, karana), sunrise-based hora / Rahu-Gulika-Yama kaal, ascendant with whole-sign houses. Interpretation: dignity, **retrograde**, **combustion**, **graha drishti (aspects)**, **parivartana (exchange)**, **mritu bhaga**, Jaimini and natural **karakas**, and planet/sign/house → product & sector mapping (every planet/sign signifies products and services). `npm run test:vedic` verifies the engine against known ingress and retrograde dates. Mritu bhaga degrees follow a commonly quoted table — have a qualified astrologer verify before relying on it.
 
+## 20-year statistics (`server/longTermStatsService.ts`)
+For every stock prediction the app loads up to 20 years of daily prices and computes: CAGR, volatility, drawdowns, 1/3/5/10/20-year returns, 200-DMA trend and 12-1 momentum, month-of-year seasonality, and a historical-analog forecast (what happened over the same number of trading days after similar trend/RSI/momentum setups) with a likely price range. A walk-forward backtest reports how often this rule was right in the past. The result is blended 50/50 into the statistical score that the AI (or the built-in formula) reads, and shown as the "20-Year Statistics" card. API: `GET /api/stock/:symbol/stats?when=...`. Test: `npm run test:stats`.
+
 ## Dev
 `npm install && npm run dev` · `npx tsc --noEmit` · `npm run build` · `npm run test:vedic`
