@@ -1,5 +1,6 @@
 import { attachReferral } from "./referrals";
 import passport from "passport";
+import rateLimit from "express-rate-limit";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Express } from "express";
 import session from "express-session";
@@ -56,6 +57,14 @@ export function setupAuth(app: Express) {
   const isProduction = process.env.NODE_ENV === "production";
 
   app.set("trust proxy", 1);
+
+  // Brute-force / abuse protection (per IP)
+  const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false, message: { message: "Too many attempts. Please wait a few minutes and try again." } });
+  const mailLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 8, standardHeaders: true, legacyHeaders: false, message: { message: "Too many reset requests. Please try again later." } });
+  const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: true, legacyHeaders: false, skip: (req) => req.path === "/health" || req.path.startsWith("/payments/webhook"), message: { message: "Too many requests. Please slow down." } });
+  app.use(["/api/login", "/api/register", "/api/reset-password"], authLimiter);
+  app.use("/api/forgot-password", mailLimiter);
+  app.use("/api", apiLimiter);
 
   app.use(session({
     secret: getSessionSecret(),

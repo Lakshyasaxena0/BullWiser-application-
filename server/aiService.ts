@@ -425,6 +425,7 @@ Return JSON:
     // ── Step 9: Metadata ─────────────────────────────────────────────────
     finalPrediction.vedic = astroPrediction?.vedic ?? null;
     finalPrediction.longTermStats = longTermStats;
+    finalPrediction.volHalfRangePct = statsResult ? this.volHalfRange(statsResult.volatility.dailyVolatility, targetDate) : null;
     finalPrediction.metadata = {
       aiEnabled:            aiStatsAnalysis !== null || aiConclusion !== null,
       aiSynthesisEnabled:   aiConclusion !== null,
@@ -865,6 +866,7 @@ Return JSON:
       astroFactors:       astroAnalysis,
       astroStrength,
       vedic:              cryptoAstro?.vedic ?? null,
+      volHalfRangePct:    statsResult ? this.volHalfRange(statsResult.volatility.dailyVolatility, targetDate) : null,
       metadata: {
         aiEnabled:    aiStatsAnalysis !== null || aiConclusion !== null,
         aiSynthesisEnabled: aiConclusion !== null,
@@ -878,6 +880,13 @@ Return JSON:
       },
       userPersonalization: userPers ? { accuracyBoost: userPers.personalizedConfidenceBoost } : null,
     };
+  }
+
+  /** ±1.28σ move (≈80% interval) over the days until the target, from the asset's own daily volatility. */
+  private volHalfRange(dailyVolPct: number, targetDate: Date): number | null {
+    if (!(dailyVolPct > 0)) return null;
+    const days = Math.max(1, (targetDate.getTime() - Date.now()) / 86400000);
+    return Math.round(Math.min(95, dailyVolPct * Math.sqrt(days) * 1.28) * 100) / 100;
   }
 
   async generateMarketInsights(marketData: any): Promise<string | null> {

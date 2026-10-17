@@ -137,6 +137,35 @@ function calculateCryptoBillingPrice(mode: string, tradesPerDay: number, cryptoV
 }
 
 // ★ Helper: Calculate time-scaled risk multiplier
+/**
+ * Price range for a prediction, based on the asset's own behaviour instead of a fixed percentage:
+ *   1. stocks with 20-year history: the historical p10–p90 of same-horizon moves after similar setups (skewed, centred on the typical move)
+ *   2. otherwise: ±1.28σ from the asset's recent daily volatility
+ *   3. otherwise: the old fixed time-scaled percentage
+ * `rangeScale` is the learned calibration (from how often real prices landed inside past ranges); riskLevel widens/narrows it.
+ */
+function computePriceRange(currentPrice: number, enhanced: any, riskMultiplier: number, riskLevel?: string): { low: number; high: number } {
+  const rs = Number(enhanced?.learningProfile?.rangeScale) || 1;
+  const k = rs * (({ low: 0.85, medium: 1, high: 1.2 } as Record<string, number>)[riskLevel || 'medium'] ?? 1);
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const lt = enhanced?.longTermStats;
+  let low: number, high: number;
+  if (lt?.reliable && lt.forecast) {
+    const f = lt.forecast;
+    const mid = f.medianReturnPct / 100;
+    low = currentPrice * (1 + mid + ((f.p10ReturnPct / 100) - mid) * k);
+    high = currentPrice * (1 + mid + ((f.p90ReturnPct / 100) - mid) * k);
+  } else if (Number(enhanced?.volHalfRangePct) > 0) {
+    const v = (Number(enhanced.volHalfRangePct) / 100) * k;
+    low = currentPrice * (1 - v); high = currentPrice * (1 + v);
+  } else {
+    low = currentPrice * (1 - riskMultiplier * k); high = currentPrice * (1 + riskMultiplier * k);
+  }
+  low = Math.max(currentPrice * 0.01, low);
+  if (high <= low) high = low * 1.001;
+  return { low: r2(low), high: r2(high) };
+}
+
 function getTimeScaledRiskMultiplier(targetDate: Date, riskLevel: string, isStock: boolean = true): number {
   const now = new Date();
   const daysUntilTarget = Math.max(1, Math.floor((targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
@@ -400,9 +429,9 @@ export function registerRoutes(app: Express): Server {
           
           // Apply time scaling to AI's range as well
           // ...and by how often past ranges actually contained the real price (self-calibration, 0.8–1.4x)
-          const rangeScale = Number(enhancedPrediction.learningProfile?.rangeScale) || 1;
-          enhancedPrediction.prediction.priceTarget.low = Math.round(center * (1 - riskMultiplier * rangeScale) * 100) / 100;
-          enhancedPrediction.prediction.priceTarget.high = Math.round(center * (1 + riskMultiplier * rangeScale) * 100) / 100;
+          const range = computePriceRange(center, enhancedPrediction, riskMultiplier, req.body.riskLevel);
+          enhancedPrediction.prediction.priceTarget.low = range.low;
+          enhancedPrediction.prediction.priceTarget.high = range.high;
           
           console.log(`[Predict] AI prediction scaled: ${aiLow}-${aiHigh} → ${enhancedPrediction.prediction.priceTarget.low}-${enhancedPrediction.prediction.priceTarget.high}`);
         }
@@ -453,11 +482,11 @@ export function registerRoutes(app: Express): Server {
       // ★ Apply time scaling to crypto predictions
       let predLow, predHigh;
       if (enhancedPrediction.prediction?.priceTarget) {
-        predLow = Math.round(currentPrice * (1 - riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
-        predHigh = Math.round(currentPrice * (1 + riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
+        const cr = computePriceRange(currentPrice, enhancedPrediction, riskMultiplier, riskLevel);
+        predLow = cr.low; predHigh = cr.high;
       } else {
-        predLow = currentPrice * (1 - riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1));
-        predHigh = currentPrice * (1 + riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1));
+        const cr = computePriceRange(currentPrice, enhancedPrediction, riskMultiplier, riskLevel);
+        predLow = cr.low; predHigh = cr.high;
       }
       
       const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based crypto analysis', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, livePriceAvailable: currentPrice > 0 };
@@ -500,8 +529,8 @@ export function registerRoutes(app: Express): Server {
       const enhancedPrediction = await aiService.generateEnhancedCryptoPrediction(cryptoSymbol.toUpperCase(), currentPrice, userId, historicalData, cryptoQuote, whenDate);
       
       // ★ Apply time scaling
-      const predLow = Math.round(currentPrice * (1 - riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
-      const predHigh = Math.round(currentPrice * (1 + riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
+      const sr = computePriceRange(currentPrice, enhancedPrediction, riskMultiplier, req.body.riskLevel || 'high');
+      const predLow = sr.low, predHigh = sr.high;
       
       const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, subscriptionId };
       
@@ -559,35 +588,30 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  app.post('/api/forecast', async (req, res) => {
+  // Long-horizon outlook from the stock's own 20-year behaviour (growth rate + volatility), not from today's tick.
+  app.post('/api/forecast', isAuthenticated, async (req, res) => {
     try {
-      const { stock = 'TCS' } = req.body;
-      const now = new Date();
-      const result: any = {};
-      const realTimeQuote = await stockDataService.getStockQuote(stock.toUpperCase());
+      const stock = String(req.body?.stock || 'TCS').toUpperCase();
+      const realTimeQuote = await stockDataService.getStockQuote(stock);
       const currentPrice = realTimeQuote?.lastPrice || 0;
-      const astrologyBias = realTimeQuote?.astrologyBias || 0;
-      for (const horizon of ['6m', '1y', '3y', '5y']) {
-        let band = 0.15, timeMultiplier = 0.5;
-        if (horizon === '1y') {
-          band = 0.30;
-          timeMultiplier = 1;
-        } else if (horizon === '3y') {
-          band = 0.60;
-          timeMultiplier = 3;
-        } else if (horizon === '5y') {
-          band = 1.0;
-          timeMultiplier = 5;
-        }
-        const technicalDirection = realTimeQuote ? (realTimeQuote.changePercent > 0 ? 0.02 : -0.02) : 0;
-        const astrologyInfluence = (astrologyBias / 100) * timeMultiplier * 0.05;
-        const center = currentPrice * (1 + technicalDirection + astrologyInfluence);
-        const predLow = Math.round(center * (1 - band) * 100) / 100;
-        const predHigh = Math.round(center * (1 + band) * 100) / 100;
-        const mid = (predLow + predHigh) / 2.0;
-        const pctChange = currentPrice > 0 ? ((mid - currentPrice) / currentPrice) * 100.0 : 0;
-        let confidence = Math.max(Math.min(60 - (band * 20) + Math.abs(astrologyBias) * 2, 85), 30);
-        result[horizon] = { stock: stock.toUpperCase(), when: now.toISOString(), currentPrice, predLow, predHigh, confidence: Math.round(confidence * 10) / 10, pctChange: Math.round(pctChange * 100) / 100, astrologyBias, horaInfluence: realTimeQuote?.horaInfluence, astroBiasApplied: true };
+      if (!(currentPrice > 0)) return res.status(503).json({ message: 'Live price unavailable right now' });
+      const bars = statisticalAnalysisService.normalizeYahooData(await stockDataService.getHistoricalData(stock, LONG_TERM_DAYS));
+      const lt = longTermStatsService.analyze(stock, bars, new Date(Date.now() + 30 * 86400000));
+      if (!lt) return res.status(404).json({ message: 'Not enough price history for a long-term outlook' });
+      const mu = Math.max(-0.05, Math.min(0.25, lt.profile.cagrPct / 100));       // sane bounds on long-run growth
+      const sigma = Math.min(1, lt.profile.annualVolPct / 100);
+      const result: any = {};
+      for (const [horizon, t] of [['6m', 0.5], ['1y', 1], ['3y', 3], ['5y', 5]] as const) {
+        const median = currentPrice * Math.pow(1 + mu, t);
+        const spread = 1.28 * sigma * Math.sqrt(t);
+        const predLow = Math.round(median * Math.exp(-spread) * 100) / 100;
+        const predHigh = Math.round(median * Math.exp(spread) * 100) / 100;
+        result[horizon] = {
+          stock, when: new Date().toISOString(), currentPrice, predLow, predHigh,
+          confidence: Math.round(Math.max(30, Math.min(60, 60 - 8 * Math.sqrt(t) - (lt.yearsOfData < 10 ? 8 : 0)))),
+          pctChange: Math.round(((median - currentPrice) / currentPrice) * 10000) / 100,
+          basis: `${lt.yearsOfData}y history: growth ${lt.profile.cagrPct}%/yr, volatility ${lt.profile.annualVolPct}%/yr (≈80% range)`,
+        };
       }
       res.json(result);
     } catch (error) {
@@ -654,8 +678,11 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  let lastTrainingStart = 0;
   app.post('/api/training/start', isAuthenticated, async (req, res) => {
     if (trainingInProgress) return res.json({ status: 'running' });
+    if (Date.now() - lastTrainingStart < 30 * 60 * 1000) return res.status(429).json({ message: 'Training was started recently. Please try again in a while.' });
+    lastTrainingStart = Date.now();
     runRealTraining();
     res.json({ status: 'started' });
   });
