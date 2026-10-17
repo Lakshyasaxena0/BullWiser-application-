@@ -9,9 +9,9 @@ ok("loose buy accepts 37 credits", (validateLooseCredits(37) as any).ok === true
 ok("loose buy rejects 3, 1.5, 'abc', 99999", [3, 1.5, "abc", 99999].every(v => !(validateLooseCredits(v) as any).ok));
 
 const c0 = predictionCost(base).credits;
-ok("lowest full prediction = AI 3 + astrology 3 + statistics 3 = 9 credits (₹90)", c0 === 9);
-ok("statistics only costs exactly 3", predictionCost({ ...base, useAi: false, useAstro: false }).credits === 3);
-ok("AI alone adds exactly 3", predictionCost({ ...base, useAstro: false }).credits === 6);
+ok("lowest full prediction = AI 3 + astrology 3 + statistics 3 base 9 + five extras at +1 each = 14 credits (₹140)", c0 === 14);
+ok("statistics only costs 3 + extras (8)", predictionCost({ ...base, useAi: false, useAstro: false }).credits === 8);
+ok("AI alone adds exactly 3", predictionCost({ ...base, useAstro: false }).credits === 11);
 ok("high-return sector costs more than low-return sector", predictionCost({ ...base, sectorTier: 2 }).credits > predictionCost({ ...base, sectorTier: 0 }).credits && sectorTier(["Defence"]) === 2 && sectorTier(["FMCG"]) === 0);
 ok("a stock performing well costs more", predictionCost({ ...base, momentumPct: 30 }).credits > c0 && momentumExtra(30) === 2 && momentumExtra(-5) === 0);
 ok("crypto costs more than stock", predictionCost({ ...base, asset: "crypto" }).credits > c0);

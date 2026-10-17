@@ -29,7 +29,8 @@ export interface CostResult { credits: number; rupees: number; lines: CostLine[]
 
 // Fixed service costs (credits): each engine that runs costs 3.
 const ENGINE = { statistics: 3, astrology: 3, ai: 3 };
-const ASSET_EXTRA: Record<Asset, number> = { stock: 0, crypto: 1 };          // crypto needs more live-data work
+const BUMP = 1;                                                               // each extra factor is worth +1 credit more
+const ASSET_EXTRA: Record<Asset, number> = { stock: 0, crypto: 1 + BUMP };          // crypto needs more live-data work
 const RISK_EXTRA: Record<Risk, number> = { low: 0, medium: 1, high: 2 };
 
 /** Extra credits for looking further ahead. */
@@ -67,8 +68,8 @@ export const normRisk = (r: unknown): Risk => (r === 'low' || r === 'high' ? r :
 export function predictionCost(i: CostInput): CostResult {
   const asset = ASSET_EXTRA[i.asset];
   const astro = i.useAstro ? ENGINE.astrology : 0, ai = i.useAi ? ENGINE.ai : 0;
-  const risk = RISK_EXTRA[i.risk], hz = horizonExtra(i.horizonDays);
-  const sec = i.sectorTier ?? 0, mom = momentumExtra(i.momentumPct), ben = benefitTier(i.potentialMovePct);
+  const risk = RISK_EXTRA[i.risk] + BUMP, hz = horizonExtra(i.horizonDays) + BUMP;
+  const sec = (i.sectorTier ?? 0) + BUMP, mom = momentumExtra(i.momentumPct) + BUMP, ben = benefitTier(i.potentialMovePct) + BUMP;
   const raw = ENGINE.statistics + astro + ai + asset + risk + hz + sec + mom + ben;
   const credits = Math.min(MAX_COST, Math.max(1, raw));
   const sectorName = i.sectors?.length ? i.sectors.slice(0, 2).join(' / ') : (i.asset === 'crypto' ? 'Crypto' : 'sector');
