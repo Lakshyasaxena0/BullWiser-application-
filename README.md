@@ -42,5 +42,8 @@ For every stock prediction the app loads up to 20 years of daily prices and comp
 
 **Weighting:** statistics 55% : astrology 45% by default everywhere (predictions, market outlook, AI prompt). The learning loop may move it gently (40–70% statistics) once enough scored predictions exist.
 
+## Self-improving loop
+Every 2 hours (and once ~90 s after the server starts, to catch up after free-tier sleep) the app compares each due prediction with the real price and scores: the final call, statistics, astrology, each astrology sub-factor, the 20-year layer vs the short-term indicators, and whether the price landed inside the predicted range. From that it re-learns: the statistics:astrology weighting (starts 55:45, stays 40–70), per-factor multipliers (0.5–1.5), the 20-year layer's share, confidence calibration, and a price-range scale (0.8–1.4, target 70% coverage). Shown on the Prediction Analytics page (`GET /api/learning/summary`). Test: `npm run test:learning`.
+
 ## Dev
 `npm install && npm run dev` · `npx tsc --noEmit` · `npm run build` · `npm run test:vedic`

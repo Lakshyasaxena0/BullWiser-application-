@@ -37,6 +37,9 @@ export interface LearningSnapshot {
   weights: { statistical: number; astrological: number }; // percentages that were used
   learnedFrom: number;             // number of past outcomes behind those weights
   aiUsed: boolean;
+  factors?: Record<string, number>;      // astrology sub-factor scores (0–100) at prediction time
+  ltDirection?: Dir | null;              // 20-year statistics layer's own call
+  shortDirection?: Dir | null;           // short-term indicators' own call
   outcome?: {
     actualPrice: number;
     changePct: number;
@@ -44,6 +47,10 @@ export interface LearningSnapshot {
     finalCorrect: boolean;
     statsCorrect: boolean | null;
     astroCorrect: boolean | null;
+    factorCorrect?: Record<string, boolean>;
+    ltCorrect?: boolean | null;
+    shortCorrect?: boolean | null;
+    inRange?: boolean;
     scoredAt: string;
   };
 }
@@ -57,6 +64,10 @@ export interface LearningProfile {
   reliability: { statistics: number; astrology: number; final: number }; // 0-100 blended hit-rates
   confidenceAdjustment: number;                       // add to the confidence
   directionAccuracy: Partial<Record<Dir, number>>;    // final-call hit-rate per direction (0-100)
+  factorWeights: Record<string, number>;              // learned multipliers (0.5–1.5) for each astrology sub-factor
+  ltShift: number;                                    // −0.15…+0.15 shift of the 20-year layer's share of the statistics score
+  rangeScale: number;                                 // 0.8…1.4 multiplier for predicted price ranges (from past coverage)
+  coverage: number | null;                            // % of past actual prices that landed inside the predicted range
   summary: string;                                    // plain language, for the AI prompt / UI
 }
 
@@ -70,6 +81,7 @@ const DEFAULT_PROFILE: LearningProfile = {
   reliability: { statistics: 50, astrology: 50, final: 50 },
   confidenceAdjustment: 0,
   directionAccuracy: {},
+  factorWeights: {}, ltShift: 0, rangeScale: 1, coverage: null,
   summary: 'No scored prediction history yet — using the standard 55% statistics / 45% astrology weighting.',
 };
 
@@ -99,6 +111,7 @@ export function buildSnapshot(args: {
   finalDirection: Dir; statsDirection: Dir | null; astroDirection: Dir | null;
   confidence: number; weights: { statistical: number; astrological: number };
   learnedFrom: number; aiUsed: boolean;
+  factors?: Record<string, number>; ltDirection?: Dir | null; shortDirection?: Dir | null;
 }): string {
   const snap: LearningSnapshot = { v: 1, ...args, confidence: Math.round(args.confidence) };
   return JSON.stringify(snap);
@@ -135,7 +148,14 @@ export function scoreOutcome(pred: any, actualPrice: number): { aiLearning: stri
 
   const hit = (d: Dir | null) => (d === null ? null : d === actualDirection);
   const finalCorrect = snap.finalDirection === actualDirection;
+  const factorCorrect: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(snap.factors ?? {})) {
+    const d: Dir | null = v >= 58 ? 'bullish' : v <= 42 ? 'bearish' : null;   // only count factors that took a side
+    if (d) factorCorrect[k] = d === actualDirection;
+  }
+  const inRange = actualPrice >= Number(pred.predLow) && actualPrice <= Number(pred.predHigh);
   snap.outcome = {
+    factorCorrect, ltCorrect: hit(snap.ltDirection ?? null), shortCorrect: hit(snap.shortDirection ?? null), inRange,
     actualPrice,
     changePct: Math.round(changePct * 100) / 100,
     actualDirection,
@@ -266,8 +286,31 @@ export function computeProfile(records: Rec[], symbol: string, sector: string, m
         ? [`- Final-call hit-rate by direction: ${Object.entries(directionAccuracy).map(([d, v]) => `${d} ${v}%`).join(', ')}.`] : []),
     ];
 
+    // ── Self-improvement of the sub-engines (market-wide, recent results count more) ──
+    const fAgg: Record<string, { n: number; hit: number }> = {};
+    let ltN = 0, ltHit = 0, shN = 0, shHit = 0, covN = 0, covHit = 0;
+    for (const { snap, w } of all) {
+      const o = snap.outcome!;
+      for (const [k, ok] of Object.entries(o.factorCorrect ?? {})) { (fAgg[k] ??= { n: 0, hit: 0 }); fAgg[k].n += w; fAgg[k].hit += ok ? w : 0; }
+      if (o.ltCorrect !== null && o.ltCorrect !== undefined) { ltN += w; ltHit += o.ltCorrect ? w : 0; }
+      if (o.shortCorrect !== null && o.shortCorrect !== undefined) { shN += w; shHit += o.shortCorrect ? w : 0; }
+      if (o.inRange !== undefined) { covN += w; covHit += o.inRange ? w : 0; }
+    }
+    const rels = Object.entries(fAgg).filter(([, v]) => v.n >= 3).map(([k, v]) => [k, rate(v.hit, v.n), v.n] as const);
+    const meanRel = rels.length ? rels.reduce((s, [, r]) => s + r, 0) / rels.length : 0.5;
+    const factorWeights: Record<string, number> = {};
+    for (const [k, r, n] of rels) factorWeights[k] = Math.round(Math.max(0.5, Math.min(1.5, 1 + (r - meanRel) * 2 * (n / (n + 25)))) * 100) / 100;
+    let ltShift = 0;
+    if (ltN >= 5 && shN >= 5) ltShift = Math.round(Math.max(-0.15, Math.min(0.15, (rate(ltHit, ltN) - rate(shHit, shN)) * 0.6 * (Math.min(ltN, shN) / (Math.min(ltN, shN) + 20)))) * 100) / 100;
+    const coverage = covN >= 5 ? covHit / covN : null;
+    const rangeScale = coverage === null ? 1 : Math.round(Math.max(0.8, Math.min(1.4, 1 + (0.7 - coverage) * (covN / (covN + 20)))) * 100) / 100;
+    if (Object.keys(factorWeights).length) lines.push(`- Astrology factors re-weighted from results: ${Object.entries(factorWeights).map(([k, v]) => `${k} ×${v}`).join(', ')}.`);
+    if (ltShift !== 0) lines.push(`- 20-year statistics layer ${ltShift > 0 ? 'beat' : 'trailed'} the short-term indicators; its share was shifted by ${ltShift > 0 ? '+' : ''}${Math.round(ltShift * 100)} points.`);
+    if (coverage !== null) lines.push(`- ${Math.round(coverage * 100)}% of real prices landed inside the predicted range (target 70%) → ranges scaled ×${rangeScale}.`);
+
     return {
       hasData: true,
+      factorWeights, ltShift, rangeScale, coverage: coverage === null ? null : Math.round(coverage * 100),
       samples: { symbol: yAgg.n, sector: sAgg.n, global: gAgg.n },
       weights: { statistical, astrological: 100 - statistical },
       reliability: { statistics: pct(rStats.blended), astrology: pct(rAstro.blended), final: pct(rFinal.blended) },

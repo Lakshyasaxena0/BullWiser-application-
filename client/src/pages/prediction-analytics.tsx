@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import SelfLearningCard from "@/components/SelfLearningCard";
 import { RefreshCw, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp } from "lucide-react";
 
 // Helper function to format Indian date/time
@@ -323,6 +324,8 @@ export default function PredictionAnalytics() {
           Refresh
         </Button>
       </div>
+
+      <SelfLearningCard />
 
       {/* Stats Cards */}
       {stats && (

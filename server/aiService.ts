@@ -242,16 +242,18 @@ Return JSON:
     // ── Step 2: Statistical analysis (55% weight) ─────────────────────────
     let statsResult: StatisticalAnalysisResult | null = null;
     let longTermStats: LongTermStats | null = null;
+    let shortSignal: Direction | null = null;
     try {
       const allBars = statisticalAnalysisService.normalizeYahooData(historicalData || []);
       const bars = allBars.slice(-500); // indicators (RSI/MACD/BB/S-R) look at the last ~2 years
       if (bars.length >= 10) {
         statsResult = statisticalAnalysisService.analyzeHistoricalData(symbol, bars);
+        shortSignal = statsResult ? (statsResult.statisticalSignal as Direction) : null;
         console.log(`[Stats] ${symbol}: score=${statsResult?.statisticalScore}, signal=${statsResult?.statisticalSignal}, bars=${bars.length}`);
         // 20-year layer: long-run profile, seasonality, analog forward returns, walk-forward backtest
         longTermStats = longTermStatsService.analyze(symbol, allBars, targetDate);
         if (longTermStats && statsResult && longTermStats.reliable) {
-          const wLT = longTermStats.blendWeight;
+          const wLT = Math.max(0.25, Math.min(0.7, longTermStats.blendWeight + (profile.ltShift ?? 0)));
           const blended = Math.round(statsResult.statisticalScore * (1 - wLT) + longTermStats.score * wLT);
           statsResult.statisticalScore = blended;
           statsResult.statisticalSignal = blended > 60 ? 'bullish' : blended < 40 ? 'bearish' : 'neutral';
@@ -268,7 +270,7 @@ Return JSON:
 
     // ── Step 3: Vedic Astrology (45% weight) ─────────────────────────────
     const astroPrediction = await astrologyService
-      .generateAstroPrediction(symbol, targetDate, currentPrice)
+      .generateAstroPrediction(symbol, targetDate, currentPrice, 'stock', profile.factorWeights)
       .catch(() => null);
 
     // ── Step 4: Advanced astrology (D-10, Sector, Transits, Yogas) ───────
@@ -407,7 +409,7 @@ Return JSON:
 
     // ── Step 8c: remember what each source said, so the cron can score them later ──
     const usedWeights = aiConclusion?.weighting ?? profile.weights;
-    finalPrediction.learningProfile = { hasData: profile.hasData, outcomes: profile.samples.global, weights: usedWeights, reliability: profile.reliability };
+    finalPrediction.learningProfile = { hasData: profile.hasData, outcomes: profile.samples.global, weights: usedWeights, reliability: profile.reliability, rangeScale: profile.rangeScale, coverage: profile.coverage };
     finalPrediction.learningSnapshot = learningService.buildSnapshot({
       market: 'stock', symbol, sector,
       finalDirection: finalPrediction.finalDirection,
@@ -415,6 +417,9 @@ Return JSON:
       astroDirection: astroPrediction ? (astroPrediction.direction as Direction) : null,
       confidence: finalPrediction.combinedConfidence,
       weights: usedWeights, learnedFrom: profile.samples.global, aiUsed: aiConclusion !== null,
+      factors: astroPrediction?.factors,
+      ltDirection: longTermStats?.reliable ? longTermStats.signal : null,
+      shortDirection: shortSignal,
     });
 
     // ── Step 9: Metadata ─────────────────────────────────────────────────
@@ -738,7 +743,7 @@ Return JSON:
     }
 
     // Astro score for crypto
-    const cryptoAstro = await astrologyService.generateAstroPrediction(cryptoSymbol, targetDate, currentPrice, 'crypto').catch(() => null);
+    const cryptoAstro = await astrologyService.generateAstroPrediction(cryptoSymbol, targetDate, currentPrice, 'crypto', profile.factorWeights).catch(() => null);
     const astroStrength = cryptoAstro ? cryptoAstro.strength : 50;
     const astroDir: 'bullish' | 'bearish' | 'neutral' = cryptoAstro ? cryptoAstro.direction : 'neutral';
 
@@ -833,11 +838,12 @@ Return JSON:
       astroDirection: astroDir,
       confidence: combinedConf,
       weights: usedWeights, learnedFrom: profile.samples.global, aiUsed: aiConclusion !== null,
+      factors: cryptoAstro?.factors,
     });
 
     return {
       learningSnapshot,
-      learningProfile: { hasData: profile.hasData, outcomes: profile.samples.global, weights: usedWeights, reliability: profile.reliability },
+      learningProfile: { hasData: profile.hasData, outcomes: profile.samples.global, weights: usedWeights, reliability: profile.reliability, rangeScale: profile.rangeScale, coverage: profile.coverage },
       prediction: { direction: finalDir, priceTarget: { low: blendedLow, high: blendedHigh } },
       combinedConfidence: combinedConf,
       confidence:         combinedConf,

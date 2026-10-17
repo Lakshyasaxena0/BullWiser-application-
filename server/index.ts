@@ -155,6 +155,14 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   });
 
   log('⏰ Prediction monitoring cron job scheduled (every 2 hours, 12 times per day)');
+  // Free hosting sleeps, so cron ticks can be missed: also check everything that fell due while the server was asleep.
+  setTimeout(async () => {
+    if (monitoringRunning) return;
+    monitoringRunning = true;
+    try { await predictionMonitoringService.monitorDuePredictions(); log('✅ [Startup] Caught up on due predictions'); }
+    catch (e) { console.error('[Startup] catch-up failed:', e); }
+    finally { monitoringRunning = false; }
+  }, 90_000);
   // ─────────────────────────────────────────────────────────────────────────────
 
   const port = parseInt(process.env.PORT || "5000", 10);

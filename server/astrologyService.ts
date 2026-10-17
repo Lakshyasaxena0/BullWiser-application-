@@ -137,7 +137,7 @@ export class AstrologyService {
   }
 
   // ── Prediction engine ─────────────────────────────────────────────────────
-  async generateAstroPrediction(symbol: string, date: Date, currentPrice: number, assetType?: 'stock' | 'crypto'): Promise<AstrologyPrediction> {
+  async generateAstroPrediction(symbol: string, date: Date, currentPrice: number, assetType?: 'stock' | 'crypto', factorWeights?: Record<string, number>): Promise<AstrologyPrediction> {
     const type = assetType ?? (CRYPTO_SYMBOLS.has(symbol.toUpperCase().replace(/[-_/]?(USD|USDT|INR)$/, '')) ? 'crypto' : 'stock');
     const astroData      = await this.getCurrentAstrology(date);
     const sky            = analyzeSky(date);
@@ -151,9 +151,13 @@ export class AstrologyService {
     const rahuKetuScore  = this.calcRahuKetuScore(astroData, date);
     const vedicScore     = 50 + vedic.score * 50;
 
-    const total =
-      horaScore * 0.12 + tithiScore * 0.10 + nakshatraScore * 0.13 +
-      planetaryScore * 0.15 + muhuratScore * 0.05 + rahuKetuScore * 0.05 + vedicScore * 0.40;
+    // Base weights, multiplied by what the learning loop found reliable (×0.5–1.5), then re-normalised to 100%.
+    const base: Record<string, number> = { hora: 0.12, tithi: 0.10, nakshatra: 0.13, planetary: 0.15, muhurat: 0.05, rahuKetu: 0.05, vedic: 0.40 };
+    const raw: Record<string, number> = {};
+    let sum = 0;
+    for (const k of Object.keys(base)) { raw[k] = base[k] * (factorWeights?.[k] ?? 1); sum += raw[k]; }
+    const sc: Record<string, number> = { hora: horaScore, tithi: tithiScore, nakshatra: nakshatraScore, planetary: planetaryScore, muhurat: muhuratScore, rahuKetu: rahuKetuScore, vedic: vedicScore };
+    const total = Object.keys(base).reduce((t, k) => t + sc[k] * (raw[k] / sum), 0);
 
     const direction: 'bullish' | 'bearish' | 'neutral' =
       total > 58 ? 'bullish' : total < 42 ? 'bearish' : 'neutral';

@@ -399,8 +399,10 @@ export function registerRoutes(app: Express): Server {
           const center = currentPrice;
           
           // Apply time scaling to AI's range as well
-          enhancedPrediction.prediction.priceTarget.low = Math.round(center * (1 - riskMultiplier) * 100) / 100;
-          enhancedPrediction.prediction.priceTarget.high = Math.round(center * (1 + riskMultiplier) * 100) / 100;
+          // ...and by how often past ranges actually contained the real price (self-calibration, 0.8–1.4x)
+          const rangeScale = Number(enhancedPrediction.learningProfile?.rangeScale) || 1;
+          enhancedPrediction.prediction.priceTarget.low = Math.round(center * (1 - riskMultiplier * rangeScale) * 100) / 100;
+          enhancedPrediction.prediction.priceTarget.high = Math.round(center * (1 + riskMultiplier * rangeScale) * 100) / 100;
           
           console.log(`[Predict] AI prediction scaled: ${aiLow}-${aiHigh} → ${enhancedPrediction.prediction.priceTarget.low}-${enhancedPrediction.prediction.priceTarget.high}`);
         }
@@ -451,11 +453,11 @@ export function registerRoutes(app: Express): Server {
       // ★ Apply time scaling to crypto predictions
       let predLow, predHigh;
       if (enhancedPrediction.prediction?.priceTarget) {
-        predLow = Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100;
-        predHigh = Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100;
+        predLow = Math.round(currentPrice * (1 - riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
+        predHigh = Math.round(currentPrice * (1 + riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
       } else {
-        predLow = currentPrice * (1 - riskMultiplier);
-        predHigh = currentPrice * (1 + riskMultiplier);
+        predLow = currentPrice * (1 - riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1));
+        predHigh = currentPrice * (1 + riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1));
       }
       
       const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based crypto analysis', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, livePriceAvailable: currentPrice > 0 };
@@ -498,8 +500,8 @@ export function registerRoutes(app: Express): Server {
       const enhancedPrediction = await aiService.generateEnhancedCryptoPrediction(cryptoSymbol.toUpperCase(), currentPrice, userId, historicalData, cryptoQuote, whenDate);
       
       // ★ Apply time scaling
-      const predLow = Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100;
-      const predHigh = Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100;
+      const predLow = Math.round(currentPrice * (1 - riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
+      const predHigh = Math.round(currentPrice * (1 + riskMultiplier * (Number(enhancedPrediction.learningProfile?.rangeScale) || 1)) * 100) / 100;
       
       const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, subscriptionId };
       
@@ -892,6 +894,15 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       res.status(500).json({ message: 'Error running statistical analysis' });
     }
+  });
+
+  // Self-learning report: how accurate past predictions were and what the system adjusted because of it
+  app.get('/api/learning/summary', isAuthenticated, async (_req, res) => {
+    try {
+      const { learningService } = await import('./learningService');
+      const [stock, crypto] = await Promise.all([learningService.getProfile('*', 'General', 'stock'), learningService.getProfile('*', 'Crypto', 'crypto')]);
+      res.json({ stock, crypto, checkedEvery: '2 hours', baseRatio: '55% statistics : 45% astrology' });
+    } catch (e) { res.status(500).json({ message: 'Error loading learning summary' }); }
   });
 
   app.get('/api/stock/:symbol/history', async (req, res) => {
