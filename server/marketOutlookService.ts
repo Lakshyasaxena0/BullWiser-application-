@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // marketOutlookService.ts — FIXED VERSION
 // Predicts bullish / bearish outlook for stock sectors and cryptocurrencies
-// Statistical Analysis (50%) + Vedic Astrology (50%)
+// Statistical Analysis (55%) + Vedic Astrology (45%)
 // 
 // KEY FIX: Now properly calculates planetary positions for TARGET DATE
 // instead of always using current date
@@ -287,8 +287,8 @@ export class MarketOutlookService {
       console.error(`[Outlook] Astro error for ${sector}:`, err);
     }
 
-    // ── Combine 50/50 ─────────────────────────────────────────────────────
-    const combinedScore = Math.round((statsScore * 0.5) + (astroScore * 0.5));
+    // ── Combine 55/45 ─────────────────────────────────────────────────────
+    const combinedScore = Math.round((statsScore * 0.55) + (astroScore * 0.45));
     const signal: SectorOutlook['signal'] = combinedScore > 60 ? 'bullish' : combinedScore < 40 ? 'bearish' : 'neutral';
     const confidence = Math.round(40 + Math.abs(combinedScore - 50) * 1.1);
 
@@ -394,8 +394,8 @@ export class MarketOutlookService {
       }
     } catch { /* skip */ }
 
-    // ── Combine 50/50 ─────────────────────────────────────────────────────
-    const combinedScore = Math.round((statsScore * 0.5) + (astroScore * 0.5));
+    // ── Combine 55/45 ─────────────────────────────────────────────────────
+    const combinedScore = Math.round((statsScore * 0.55) + (astroScore * 0.45));
     const signal: CryptoOutlook['signal'] = combinedScore > 60 ? 'bullish' : combinedScore < 40 ? 'bearish' : 'neutral';
     const confidence = Math.round(35 + Math.abs(combinedScore - 50) * 0.9); // crypto lower confidence
 

@@ -427,7 +427,7 @@ export default function Plans() {
               <p className="font-medium mb-1">Investment Disclaimer</p>
               <p className="text-xs">
                 BullWiser combines statistical analysis (RSI, MACD, Moving Averages) and Vedic astrology 
-                in a 50/50 model. This is not financial advice. Always do your own research before investing. 
+                in a 55% statistics / 45% astrology model. This is not financial advice. Always do your own research before investing. 
                 Past performance does not guarantee future results.
               </p>
             </div>

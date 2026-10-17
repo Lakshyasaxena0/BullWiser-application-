@@ -60,14 +60,17 @@ export interface LearningProfile {
   summary: string;                                    // plain language, for the AI prompt / UI
 }
 
+/** House ratio: statistics 55% : astrology 45%. Learning may move it, but only gently and within 40–70. */
+export const BASE_STAT = 55;
+
 const DEFAULT_PROFILE: LearningProfile = {
   hasData: false,
   samples: { symbol: 0, sector: 0, global: 0 },
-  weights: { statistical: 50, astrological: 50 },
+  weights: { statistical: BASE_STAT, astrological: 100 - BASE_STAT },
   reliability: { statistics: 50, astrology: 50, final: 50 },
   confidenceAdjustment: 0,
   directionAccuracy: {},
-  summary: 'No scored prediction history yet — using an even 50/50 weighting.',
+  summary: 'No scored prediction history yet — using the standard 55% statistics / 45% astrology weighting.',
 };
 
 const MIN_OUTCOMES_TO_TRUST = 5;   // market-wide scored outcomes needed before weights move
@@ -202,7 +205,7 @@ export async function getProfile(symbol: string, sector: string, market: Market)
   try {
     return computeProfile(await loadRecords(), symbol, sector, market);
   } catch (err) {
-    console.error('[Learning] getProfile failed (using 50/50):', err);
+    console.error('[Learning] getProfile failed (using 55/45):', err);
     return DEFAULT_PROFILE;
   }
 }
@@ -215,7 +218,7 @@ export function computeProfile(records: Rec[], symbol: string, sector: string, m
     const gAgg = aggregate(all);
     if (gAgg.n < MIN_OUTCOMES_TO_TRUST) {
       return { ...DEFAULT_PROFILE, samples: { symbol: 0, sector: 0, global: gAgg.n },
-        summary: `Only ${gAgg.n} scored prediction${gAgg.n === 1 ? '' : 's'} so far — not enough to adjust the 50/50 weighting.` };
+        summary: `Only ${gAgg.n} scored prediction${gAgg.n === 1 ? '' : 's'} so far — not enough to adjust the standard 55/45 weighting.` };
     }
     const sAgg = aggregate(all.filter(r => r.sector === sector));
     const yAgg = aggregate(all.filter(r => r.symbol.toUpperCase() === sym));
@@ -231,9 +234,11 @@ export function computeProfile(records: Rec[], symbol: string, sector: string, m
     const rAstro = pick(a => [a.aHit, a.astroN]);
     const rFinal = pick(a => [a.fHit, a.fN]);
 
-    // Weights: share of reliability, kept inside 25–75 so neither source is ever ignored.
+    // Weights: share of reliability, kept inside 40–70 so neither source is ever ignored.
+    // Start from the 55/45 house ratio and move toward the evidence only as fast as the sample size justifies.
     const raw = rStats.blended / (rStats.blended + rAstro.blended);
-    const wS = Math.min(0.75, Math.max(0.25, raw));
+    const trust = gAgg.n / (gAgg.n + 30);
+    const wS = Math.min(0.70, Math.max(0.40, BASE_STAT / 100 + (raw - 0.5) * trust));
     const statistical = Math.round(wS * 100);
 
     // Confidence calibration: stated confidence vs real hit-rate (market-wide → sector → symbol).

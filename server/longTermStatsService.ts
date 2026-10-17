@@ -33,6 +33,7 @@ export interface LongTermStats {
     expectedPrice: number; rangeLow: number; rangeHigh: number;
   };
   backtest: { tests: number; hitRatePct: number | null; note: string };
+  blendWeight: number;          // how much of the statistical score this 20-year layer should carry (0.3–0.65)
   score: number;                // 0–100
   signal: 'bullish' | 'bearish' | 'neutral';
   confidence: number;           // 30–80
@@ -120,10 +121,19 @@ export class LongTermStatsService {
     const a = analog(n - 1, H);
     const sortedA = [...a.rets].sort((x, y) => x - y);
     const useRets = sortedA.length >= 20 ? sortedA : [...a.all].sort((x, y) => x - y);
-    const probUp = mean(useRets.map(x => (x > 0 ? 1 : 0)));
+    const rawProbUp = mean(useRets.map(x => (x > 0 ? 1 : 0)));
     const baseProbUp = mean(a.all.map(x => (x > 0 ? 1 : 0)));
-    const p10 = quantile(useRets, 0.1), p50 = quantile(useRets, 0.5), p90 = quantile(useRets, 0.9);
     const effN = Math.floor(useRets.length / Math.max(1, H));               // overlapping windows → fewer independent samples
+    // Bayesian shrinkage: with few independent analogs, lean on the stock's all-window base rate instead of a lucky streak.
+    const probUp = (effN * rawProbUp + 8 * baseProbUp) / (effN + 8);
+    // Volatility regime: if the stock is calmer/wilder now than during its analogs, scale the range accordingly.
+    const recentVol = std(dRet.slice(-20)) * Math.sqrt(252), longVol = annVol;
+    const volScale = Math.max(0.6, Math.min(1.6, longVol > 0 ? recentVol / longVol : 1));
+    // Typical move = analog median shrunk toward the stock's own long-run drift over the horizon.
+    const drift = Math.pow(1 + cagr, H / 252) - 1;
+    const rawMedian = quantile(useRets, 0.5);
+    const p50 = (effN * rawMedian + 8 * drift) / (effN + 8);
+    const p10 = p50 + (quantile(useRets, 0.1) - rawMedian) * volScale, p90 = p50 + (quantile(useRets, 0.9) - rawMedian) * volScale;
 
     // ── Trend & momentum ──
     const above = cur > sma200[n - 1];
@@ -186,6 +196,7 @@ export class LongTermStatsService {
     const f: string[] = [], risks: string[] = [];
     f.push(`${r2(years)} years of data (${n} daily bars): CAGR ${r2(cagr * 100)}%, annual volatility ${r2(annVol * 100)}%, worst drawdown ${r2(maxDD * 100)}%.`);
     f.push(`Over similar past setups (${a.method}) the stock rose after ${Math.round(probUp * 100)}% of ${H}-trading-day windows (all windows: ${Math.round(baseProbUp * 100)}%); median move ${r2(p50 * 100)}%.`);
+    f.push(`Probability is shrunk towards the stock's base rate when few independent analogs exist; range is scaled to current volatility (${r2(volScale)}x of normal).`);
     f.push(`Trend: ${trendState}${mom12_1 !== null ? `; 12-1 month momentum ${r2(mom12_1 * 100)}%` : ''}.`);
     if (tm.length >= 8) f.push(`${seas.month} has averaged ${seas.avgMonthlyReturnPct}% with a ${seas.monthlyWinRatePct}% win rate over ${tm.length} years.`);
     if (hit !== null) f.push(`Walk-forward backtest of this rule: ${hit}% correct direction over ${tests} past calls.`);
@@ -210,6 +221,7 @@ export class LongTermStatsService {
         expectedPrice: r2(cur * (1 + p50)), rangeLow: r2(cur * (1 + p10)), rangeHigh: r2(cur * (1 + p90)),
       },
       backtest: { tests, hitRatePct: hit, note: 'Monthly walk-forward test over the last ~6 years using only data available at each date.' },
+      blendWeight: Math.max(0.3, Math.min(0.65, 0.5 + (hit !== null ? (hit >= 55 ? 0.1 : hit < 48 ? -0.15 : 0) : 0) + (effN < 8 ? -0.1 : 0) + (years >= 10 ? 0.05 : 0))),
       score: Math.round(score), signal, confidence, keyFindings: f, keyRisks: risks,
     };
   }

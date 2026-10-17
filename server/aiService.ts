@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // aiService.ts
-// Prediction pipeline: Statistical Analysis (50%) + Vedic Astrology (50%)
+// Prediction pipeline: Statistical Analysis (55%) + Vedic Astrology (45%)
 // AI (Groq llama-3.3-70b) interprets statistical results and combines with astro
 // If Groq is unavailable, the built-in statistics + astrology engine produces the answer
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ You receive two independent analyses of the same asset:
 Study BOTH, decide how much weight each deserves, say where they agree or conflict, and give one clear, balanced conclusion.
 Rules:
 - Use only the data provided. Never invent prices, news or indicators.
-- The LEARNED TRACK RECORD below says how reliable each source has actually been on past, scored predictions. Use its weighting as your starting point (stay within ~10 points of it). With no track record, start from 50/50. Shift further only if one side is neutral or missing, and reflect that in the weighting numbers.
+- The LEARNED TRACK RECORD below says how reliable each source has actually been on past, scored predictions. Use its weighting as your starting point (stay within ~10 points of it). With no track record, use the house ratio 55% statistics / 45% astrology (stay within ~5 points). Shift further only if one side is neutral or missing, and reflect that in the weighting numbers.
 - If a source has a poor track record, say so and lean on the other one.
 - If the two sides disagree, say so plainly and lower confidence instead of hiding the conflict.
 - Use hedged language ("suggests", "leans"). Never promise returns. This is analysis, not financial advice.
@@ -193,12 +193,13 @@ Return JSON:
 
     let wStat = Number(raw.weighting?.statistical);
     let wAstro = Number(raw.weighting?.astrological);
-    if (!isFinite(wStat) || !isFinite(wAstro) || wStat < 0 || wAstro < 0 || wStat + wAstro === 0) { wStat = 50; wAstro = 50; }
+    if (!isFinite(wStat) || !isFinite(wAstro) || wStat < 0 || wAstro < 0 || wStat + wAstro === 0) { wStat = 55; wAstro = 45; }
     let total = wStat + wAstro;
     // Evidence beats opinion: when there is a real track record, the AI may only nudge the learned weighting by 10 points.
-    if (input.learned?.hasData) {
-      const base = input.learned.weights.statistical;
-      const statPct = Math.min(base + 10, Math.max(base - 10, (wStat / total) * 100));
+    {
+      const base = input.learned?.hasData ? input.learned.weights.statistical : 55;   // house ratio: 55% statistics : 45% astrology
+      const room = input.learned?.hasData ? 10 : 5;
+      const statPct = Math.min(base + room, Math.max(base - room, (wStat / total) * 100));
       wStat = statPct; wAstro = 100 - statPct; total = 100;
     }
 
@@ -238,7 +239,7 @@ Return JSON:
     if (profile.hasData) learningAdjustment = { ...learningAdjustment, confidenceAdjustment: profile.confidenceAdjustment };
     console.log(`[Learning] ${symbol}: weights ${profile.weights.statistical}/${profile.weights.astrological}, outcomes=${profile.samples.global}, confAdj=${profile.confidenceAdjustment}`);
 
-    // ── Step 2: Statistical analysis (50% weight) ─────────────────────────
+    // ── Step 2: Statistical analysis (55% weight) ─────────────────────────
     let statsResult: StatisticalAnalysisResult | null = null;
     let longTermStats: LongTermStats | null = null;
     try {
@@ -250,7 +251,8 @@ Return JSON:
         // 20-year layer: long-run profile, seasonality, analog forward returns, walk-forward backtest
         longTermStats = longTermStatsService.analyze(symbol, allBars, targetDate);
         if (longTermStats && statsResult && longTermStats.reliable) {
-          const blended = Math.round(statsResult.statisticalScore * 0.5 + longTermStats.score * 0.5);
+          const wLT = longTermStats.blendWeight;
+          const blended = Math.round(statsResult.statisticalScore * (1 - wLT) + longTermStats.score * wLT);
           statsResult.statisticalScore = blended;
           statsResult.statisticalSignal = blended > 60 ? 'bullish' : blended < 40 ? 'bearish' : 'neutral';
           statsResult.keyFindings = [...longTermStats.keyFindings.slice(0, 3), ...(statsResult.keyFindings ?? [])];
@@ -264,7 +266,7 @@ Return JSON:
       console.error('[Stats] Statistical analysis error:', statsErr);
     }
 
-    // ── Step 3: Vedic Astrology (50% weight) ─────────────────────────────
+    // ── Step 3: Vedic Astrology (45% weight) ─────────────────────────────
     const astroPrediction = await astrologyService
       .generateAstroPrediction(symbol, targetDate, currentPrice)
       .catch(() => null);
@@ -302,7 +304,7 @@ Return JSON:
       aiStatsAnalysis = await this.interpretStatisticsWithAI(symbol, currentPrice, statsResult, sector);
     }
 
-    // ── Step 6: Combine Statistical (50%) + Astrological (50%) ───────────
+    // ── Step 6: Combine Statistical (55%) + Astrological (45%) ───────────
     const combined = this.combineStatsAndAstro(
       statsResult, astroPrediction, advancedAstroResult,
       aiStatsAnalysis, yogaBonus, transitImpact,
@@ -507,7 +509,7 @@ Return JSON:
     };
   }
 
-  // ── Combine Stats (50%) + Astro (50%) ────────────────────────────────────
+  // ── Combine Stats (55%) + Astro (45%) ────────────────────────────────────
   private combineStatsAndAstro(
     statsResult:        StatisticalAnalysisResult | null,
     astroPrediction:    any,
@@ -518,7 +520,7 @@ Return JSON:
     currentPrice:       number,
     sector:             string,
     learningAdjustment: any,
-    weights:            { statistical: number; astrological: number } = { statistical: 50, astrological: 50 }
+    weights:            { statistical: number; astrological: number } = { statistical: 55, astrological: 45 }
   ): any {
     const wS = weights.statistical / 100;
     const wA = weights.astrological / 100;

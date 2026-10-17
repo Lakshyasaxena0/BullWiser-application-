@@ -340,7 +340,7 @@ export default function MarketOutlook() {
             <span>Market Outlook</span>
           </h1>
           <p className="text-sm text-gray-600">
-            Sector & crypto trend forecast using Statistical Analysis + Vedic Astrology (50/50)
+            Sector & crypto trend forecast using Statistical Analysis (55%) + Vedic Astrology (45%)
           </p>
         </div>
         <Button onClick={() => refetch()} disabled={isLoading} size="sm" variant="outline">
@@ -531,7 +531,7 @@ export default function MarketOutlook() {
         <CardContent className="pt-6">
           <p className="text-xs text-amber-800">
             <strong>Disclaimer:</strong> BullWiser outlook combines statistical analysis (RSI, MACD, Moving Averages) and 
-            Vedic astrology in a 50/50 model. This is not financial advice. Always do your own research before investing.
+            Vedic astrology in a 55% statistics / 45% astrology model. This is not financial advice. Always do your own research before investing.
           </p>
         </CardContent>
       </Card>

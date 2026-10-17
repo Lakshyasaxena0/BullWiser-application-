@@ -14,4 +14,6 @@ ok("backtest ran", r.backtest.tests > 10);
 ok("deterministic", JSON.stringify(r) === JSON.stringify(longTermStatsService.analyze("SYN", bars, new Date(now.getTime() + 30 * 86400000), now)));
 ok("too little data → null", longTermStatsService.analyze("X", bars.slice(0, 100), now) === null);
 ok("horizon 30 calendar days ≈ 21 trading days", tradingDaysBetween(now, new Date(now.getTime() + 30 * 86400000)) === 21);
+ok("blend weight sane", r.blendWeight>=0.3 && r.blendWeight<=0.65);
+ok("range scaled & ordered", r.forecast.rangeLow < r.forecast.rangeHigh);
 process.exit(fail ? 1 : 0);
