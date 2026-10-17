@@ -10,7 +10,9 @@ import { learningService, type LearningProfile } from './learningService';
 import { stockDataService }          from './stockDataService';
 import { feedbackLearningService, NEUTRAL_LEARNING_ADJUSTMENT } from './feedbackLearningService';
 import { astrologyService }          from './astrologyService';
-import { longTermStatsService, LongTermStats } from './longTermStatsService';
+import { longTermStatsService, LongTermStats, LONG_TERM_DAYS } from './longTermStatsService';
+import { getMarketContext } from './marketContextService';
+import { getRequestOptions } from './requestOptions';
 import { advancedAstrologyService }  from './advancedAstrologyService';
 import { statisticalAnalysisService, type StatisticalAnalysisResult } from './statisticalAnalysisService';
 
@@ -235,7 +237,9 @@ Return JSON:
 
     // Learned track record (all users, all scored outcomes): decides the statistics-vs-astrology
     // weighting and corrects over/under-confidence.
-    const profile = await learningService.getProfile(symbol, sector, 'stock');
+    const useAstro = getRequestOptions().useAstro;           // Settings → astrology on/off
+    const profile0 = await learningService.getProfile(symbol, sector, 'stock');
+    const profile = useAstro ? profile0 : { ...profile0, weights: { statistical: 100, astrological: 0 } };
     if (profile.hasData) learningAdjustment = { ...learningAdjustment, confidenceAdjustment: profile.confidenceAdjustment };
     console.log(`[Learning] ${symbol}: weights ${profile.weights.statistical}/${profile.weights.astrological}, outcomes=${profile.samples.global}, confAdj=${profile.confidenceAdjustment}`);
 
@@ -243,6 +247,7 @@ Return JSON:
     let statsResult: StatisticalAnalysisResult | null = null;
     let longTermStats: LongTermStats | null = null;
     let shortSignal: Direction | null = null;
+    let marketContext: Awaited<ReturnType<typeof getMarketContext>> = null;
     try {
       const allBars = statisticalAnalysisService.normalizeYahooData(historicalData || []);
       const bars = allBars.slice(-500); // indicators (RSI/MACD/BB/S-R) look at the last ~2 years
@@ -261,6 +266,15 @@ Return JSON:
           statsResult.keyRisks = [...longTermStats.keyRisks, ...(statsResult.keyRisks ?? [])];
           console.log(`[Stats] ${symbol}: 20y layer score=${longTermStats.score} (${longTermStats.yearsOfData}y, hit-rate ${longTermStats.backtest.hitRatePct}%) → blended ${blended}`);
         }
+        // Market context: Nifty trend, relative strength vs Nifty, India VIX (small ±6 nudge)
+        const mctx = await getMarketContext(allBars);
+        if (mctx && statsResult && mctx.scoreAdj !== 0) {
+          const adjusted = Math.max(0, Math.min(100, statsResult.statisticalScore + mctx.scoreAdj));
+          statsResult.statisticalScore = adjusted;
+          statsResult.statisticalSignal = adjusted > 60 ? 'bullish' : adjusted < 40 ? 'bearish' : 'neutral';
+          statsResult.keyFindings = [...mctx.notes, ...(statsResult.keyFindings ?? [])];
+        }
+        marketContext = mctx;
       } else {
         console.log(`[Stats] Not enough bars for ${symbol}: ${bars.length}`);
       }
@@ -269,7 +283,7 @@ Return JSON:
     }
 
     // ── Step 3: Vedic Astrology (45% weight) ─────────────────────────────
-    const astroPrediction = await astrologyService
+    const astroPrediction = !useAstro ? null : await astrologyService
       .generateAstroPrediction(symbol, targetDate, currentPrice, 'stock', profile.factorWeights)
       .catch(() => null);
 
@@ -279,6 +293,7 @@ Return JSON:
     let transitImpact = 0;
 
     try {
+      if (!useAstro) throw new Error('astrology switched off');
       advancedAstroResult = await advancedAstrologyService.analyzeStockBySector(symbol, sector, targetDate);
       const d1Chart    = advancedAstrologyService.generateD1Chart(targetDate, '09:15', 19.0760, 72.8777);
       const d10Analysis = advancedAstrologyService.generateD10Chart(d1Chart);
@@ -297,7 +312,7 @@ Return JSON:
       transitImpact     = Math.max(-15, Math.min(15, (benefic - malefic) * 3));
       console.log(`[AdvAstro] ${symbol}: timing=${advancedAstroResult?.timing}, yoga=${yogaBonus}, transit=${transitImpact}`);
     } catch (advErr) {
-      console.error('[AdvAstro] Non-fatal error:', advErr);
+      if (useAstro) console.error('[AdvAstro] Non-fatal error:', advErr);
     }
 
     // ── Step 5: AI interprets statistics ─────────────────────────────────
@@ -425,6 +440,7 @@ Return JSON:
     // ── Step 9: Metadata ─────────────────────────────────────────────────
     finalPrediction.vedic = astroPrediction?.vedic ?? null;
     finalPrediction.longTermStats = longTermStats;
+    finalPrediction.marketContext = marketContext;
     finalPrediction.volHalfRangePct = statsResult ? this.volHalfRange(statsResult.volatility.dailyVolatility, targetDate) : null;
     finalPrediction.metadata = {
       aiEnabled:            aiStatsAnalysis !== null || aiConclusion !== null,
@@ -725,6 +741,23 @@ Return JSON:
       if (yahooBars.length >= 10) {
         statsResult = statisticalAnalysisService.analyzeHistoricalData(cryptoSymbol, yahooBars);
         console.log(`[Stats] Crypto ${cryptoSymbol}: score=${statsResult?.statisticalScore}, bars=${yahooBars.length}`);
+        // Long history (Yahoo SYMBOL-USD, up to ~10y for BTC/ETH) → same long-run engine as stocks
+        try {
+          const longRaw = await stockDataService.getYahooSeries(`${cryptoSymbol}-USD`, LONG_TERM_DAYS);
+          const longBars = statisticalAnalysisService.normalizeYahooData(longRaw);
+          if (statsResult && longBars.length >= 365) {
+            const lt = longTermStatsService.analyze(cryptoSymbol, longBars, targetDate);
+            if (lt && lt.reliable) {
+              const w = Math.max(0.25, Math.min(0.6, lt.blendWeight - 0.05));
+              const blended = Math.round(statsResult.statisticalScore * (1 - w) + lt.score * w);
+              statsResult.statisticalScore = blended;
+              statsResult.statisticalSignal = blended > 60 ? 'bullish' : blended < 40 ? 'bearish' : 'neutral';
+              statsResult.keyFindings = [...lt.keyFindings.slice(0, 3), ...(statsResult.keyFindings ?? [])];
+              statsResult.keyRisks = [...lt.keyRisks, ...(statsResult.keyRisks ?? [])];
+              console.log(`[Stats] Crypto ${cryptoSymbol}: ${lt.yearsOfData}y layer score=${lt.score} → blended ${blended}`);
+            }
+          }
+        } catch (e) { console.error('[Stats] Crypto long-history layer failed:', e); }
       }
     } catch (err) {
       console.error('[Stats] Crypto stats error:', err);
@@ -732,7 +765,9 @@ Return JSON:
 
     const astroAnalysis = await astrologyService.getCurrentAstrology(targetDate);
     const userPers      = await feedbackLearningService.getUserPersonalization(userId).catch(() => null);
-    const profile       = await learningService.getProfile(cryptoSymbol, 'Crypto', 'crypto');
+    const useAstro      = getRequestOptions().useAstro;
+    const profile0      = await learningService.getProfile(cryptoSymbol, 'Crypto', 'crypto');
+    const profile       = useAstro ? profile0 : { ...profile0, weights: { statistical: 100, astrological: 0 } };
     const wS = profile.weights.statistical / 100;
     const wA = profile.weights.astrological / 100;
     console.log(`[Learning] ${cryptoSymbol}: weights ${profile.weights.statistical}/${profile.weights.astrological}, outcomes=${profile.samples.global}, confAdj=${profile.confidenceAdjustment}`);
@@ -744,7 +779,7 @@ Return JSON:
     }
 
     // Astro score for crypto
-    const cryptoAstro = await astrologyService.generateAstroPrediction(cryptoSymbol, targetDate, currentPrice, 'crypto', profile.factorWeights).catch(() => null);
+    const cryptoAstro = !useAstro ? null : await astrologyService.generateAstroPrediction(cryptoSymbol, targetDate, currentPrice, 'crypto', profile.factorWeights).catch(() => null);
     const astroStrength = cryptoAstro ? cryptoAstro.strength : 50;
     const astroDir: 'bullish' | 'bearish' | 'neutral' = cryptoAstro ? cryptoAstro.direction : 'neutral';
 
@@ -808,7 +843,7 @@ Return JSON:
         findings: (statsResult.keyFindings ?? []).slice(0, 5),
         risks:    (statsResult.keyRisks ?? []).slice(0, 4),
       } : null,
-      astro: {
+      astro: !cryptoAstro ? null : {
         direction:      astroDir,
         strength:       Math.round(astroStrength),
         confidence:     Math.round(astroStrength),
@@ -836,7 +871,7 @@ Return JSON:
       market: 'crypto', symbol: cryptoSymbol, sector: 'Crypto',
       finalDirection: finalDir,
       statsDirection: statsResult ? (statsDir as Direction) : null,
-      astroDirection: astroDir,
+      astroDirection: cryptoAstro ? astroDir : null,
       confidence: combinedConf,
       weights: usedWeights, learnedFrom: profile.samples.global, aiUsed: aiConclusion !== null,
       factors: cryptoAstro?.factors,

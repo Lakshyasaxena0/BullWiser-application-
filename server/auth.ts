@@ -118,8 +118,8 @@ export function setupAuth(app: Express) {
       if (password !== confirmPassword) {
         return res.status(400).json({ message: "Passwords do not match" });
       }
-      if (password.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters" });
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
       }
       // An email is needed so a forgotten password can be reset by mail
       const cleanEmail = typeof email === "string" ? email.trim().toLowerCase() : "";

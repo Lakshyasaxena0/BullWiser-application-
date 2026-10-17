@@ -103,13 +103,13 @@ export default function MarketOutlook() {
 
   if (error) {
     const err = error as Error;
-    if (err.message.includes('subscription') || err.message.includes('Subscription')) {
+    if (/credits|recharge|subscription/i.test(err.message)) {
       return (
         <Card className="p-12 text-center">
           <Lock className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Subscription Required</h3>
-          <p className="text-gray-600 mb-4">Active subscription required to access market outlook</p>
-          <Button onClick={() => setLocation('/plans')}>View Plans</Button>
+          <h3 className="text-lg font-semibold mb-2">Credits Needed</h3>
+          <p className="text-gray-600 mb-4">You don't have enough credits for this outlook. Recharge to continue.</p>
+          <Button onClick={() => setLocation('/plans')}>Recharge Credits</Button>
         </Card>
       );
     }

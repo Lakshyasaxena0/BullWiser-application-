@@ -60,6 +60,10 @@ export default function PredictionAnalytics() {
     refetchOnMount: true,
   });
 
+  const { data: calib } = useQuery<{ total: number; buckets: { label: string; n: number; hitRatePct: number | null }[] }>({
+    queryKey: ['/api/predictions/calibration'],
+  });
+
   const filteredPredictions = predictions?.filter(p => {
     if (filterType === 'all') return true;
     if (filterType === 'pending') return p.actualPrice === null;
@@ -326,6 +330,26 @@ export default function PredictionAnalytics() {
       </div>
 
       <SelfLearningCard />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Confidence vs real results</CardTitle>
+          <p className="text-xs text-gray-500">How often the real price landed inside the predicted range, grouped by the confidence shown. Higher confidence should mean a higher hit rate.</p>
+        </CardHeader>
+        <CardContent>
+          {!calib?.total ? <p className="text-sm text-gray-500">Not enough checked predictions yet.</p> : (
+            <div className="space-y-2">
+              {calib.buckets.map(b => (
+                <div key={b.label} className="flex items-center gap-3 text-sm">
+                  <span className="w-20 text-gray-600">{b.label}</span>
+                  <div className="flex-1 h-3 bg-gray-100 rounded"><div className="h-3 rounded bg-primary" style={{ width: `${b.hitRatePct ?? 0}%` }} /></div>
+                  <span className="w-28 text-right text-gray-700">{b.hitRatePct === null ? '—' : `${b.hitRatePct}%`} <span className="text-xs text-gray-400">({b.n})</span></span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Stats Cards */}
       {stats && (

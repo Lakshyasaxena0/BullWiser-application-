@@ -1,3 +1,4 @@
+import { getRequestOptions } from './requestOptions';
 // ─────────────────────────────────────────────────────────────────────────────
 // groqClient.ts
 // The ONLY external AI provider: Groq (llama-3.3-70b-versatile).
@@ -32,6 +33,7 @@ export async function groqJSON(
   userPrompt: string,
   maxTokens: number = 900
 ): Promise<any | null> {
+  if (!getRequestOptions().useAi) return null;      // user switched AI off in Settings → built-in engine only
   const key = getGroqKey();
   if (!key) return null;
   if (Date.now() < breakerOpenUntil) return null;   // recently failed: don't make users wait again

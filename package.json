@@ -19,7 +19,8 @@
     "test:vedic": "tsx server/vedic/selfTest.ts",
     "test:stats": "tsx server/longTermSelfTest.ts",
     "test:weights": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/weightsSelfTest.ts",
-    "test:learning": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/learningSelfTest.ts"
+    "test:learning": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/learningSelfTest.ts",
+    "test:credits": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/creditsSelfTest.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

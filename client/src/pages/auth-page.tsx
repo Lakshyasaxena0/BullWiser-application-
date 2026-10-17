@@ -167,11 +167,11 @@ export default function AuthPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="register-password">Password *</Label>
-                    <PasswordInput id="register-password" name="password" placeholder="Minimum 6 characters" required minLength={6} />
+                    <PasswordInput id="register-password" name="password" placeholder="Minimum 8 characters" required minLength={8} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirmPassword">Confirm Password *</Label>
-                    <PasswordInput id="confirmPassword" name="confirmPassword" placeholder="Re-enter your password" required minLength={6} />
+                    <PasswordInput id="confirmPassword" name="confirmPassword" placeholder="Re-enter your password" required minLength={8} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="referral-code">Referral code (optional)</Label>

@@ -9,11 +9,9 @@ interface ReferralInfo {
   code: string;
   invited: number;
   waiting: number;
-  credits: number;
-  used: number;
-  discountPercent: number;
-  perReferralPercent: number;
-  maxDiscountPercent: number;
+  rewarded: number;
+  bonusPerFriend: number;
+  totalBonusCredits: number;
 }
 
 export function ReferralCard() {
@@ -51,11 +49,11 @@ export function ReferralCard() {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-lg">
           <Gift className="h-5 w-5 text-amber-600" />
-          Refer a friend, get {data.perReferralPercent}% off
+          Refer a friend, get {data.bonusPerFriend} free credits
         </CardTitle>
         <CardDescription>
-          Jab aapka dost apna pehla payment karta hai, aapko agle payment par {data.perReferralPercent}% discount milta hai
-          (max {data.maxDiscountPercent}%). Sirf sign-up par discount nahi milta.
+          Jab aapka dost apna pehla credit recharge karta hai, aapko {data.bonusPerFriend} credits (₹{data.bonusPerFriend * 10}) turant
+          wallet me mil jaate hain. Sirf sign-up par credits nahi milte.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -89,12 +87,12 @@ export function ReferralCard() {
             <div className="text-xs text-gray-500">Friends joined</div>
           </div>
           <div className="rounded-md bg-white p-2 border">
-            <div className="text-xl font-bold">{data.credits + data.used}</div>
+            <div className="text-xl font-bold">{data.rewarded}</div>
             <div className="text-xs text-gray-500">Friends paid</div>
           </div>
           <div className="rounded-md bg-white p-2 border">
-            <div className="text-xl font-bold text-green-600" data-testid="text-referral-discount">{data.discountPercent}%</div>
-            <div className="text-xs text-gray-500">Off your next payment</div>
+            <div className="text-xl font-bold text-green-600" data-testid="text-referral-discount">{data.totalBonusCredits}</div>
+            <div className="text-xs text-gray-500">Credits earned</div>
           </div>
         </div>
       </CardContent>

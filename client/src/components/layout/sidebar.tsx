@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   LayoutDashboard,
@@ -26,18 +27,19 @@ const navigation = [
   { name: "Dashboard",       href: "/",                    icon: LayoutDashboard },
   { name: "Portfolio",       href: "/portfolio",           icon: Briefcase },
   { name: "Notifications",   href: "/notifications",       icon: Bell },
-  { name: "Subscription",    href: "/subscription",        icon: CreditCard },
   { name: "Predictions",     href: "/predictions",         icon: TrendingUp },
   { name: "Trading History", href: "/trading-history",     icon: History },
   { name: "Market Outlook",  href: "/market-outlook",      icon: LineChart },      // ★ RESTORED
   { name: "Analytics",       href: "/prediction-analytics", icon: BarChart3 },      // ★ NEW
-  { name: "Plans",           href: "/plans",               icon: Crown },
+  { name: "Plans & Recharge", href: "/plans",               icon: Crown },
   { name: "Settings",        href: "/settings",            icon: Settings },
 ];
 
 export default function Sidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
+  const { data: credits } = useQuery<{ balance: number }>({ queryKey: ["/api/credits/me"], refetchInterval: 60000 });
+  const greetName = user?.firstName || (user?.email ? user.email.split("@")[0] : "there");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -130,11 +132,8 @@ export default function Sidebar() {
                 )}
                 <div>
                   <p className="font-semibold text-gray-900" data-testid="text-user-name">
-                    {user?.firstName && user?.lastName
-                      ? `${user.firstName} ${user.lastName}`
-                      : user?.email || "User"}
-                  </p>
-                  <p className="text-sm text-gray-500 opacity-80" data-testid="text-user-plan">Premium Plan</p>
+                    Hi, {greetName}</p>
+                  <Link href="/plans"><a className="text-sm text-primary font-medium" data-testid="text-user-credits">🪙 {credits?.balance ?? "…"} credits</a></Link>
                 </div>
               </div>
             ) : (

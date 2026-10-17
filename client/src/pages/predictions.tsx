@@ -3,6 +3,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/queryClient";
+import { ToastAction } from "@/components/ui/toast";
+import { CostPreview } from "@/components/CostPreview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -128,10 +130,15 @@ export default function Predictions() {
       setPredResult(data);
       queryClient.invalidateQueries({ queryKey: ["/api/user/predictions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user/predictions/active"] });
-      toast({ title: "Prediction Generated!", description: `${symbol} prediction ready` });
+      queryClient.invalidateQueries({ queryKey: ["/api/credits/me"] });
+      if (data?.creditsCharged) toast({ title: "Prediction Generated!", description: `${symbol} ready — ${data.creditsCharged} credits used` });
+      else toast({ title: "Prediction Generated!", description: `${symbol} prediction ready` });
     },
     onError: (err: Error) => {
-      toast({ title: "Prediction Failed", description: err.message, variant: "destructive" });
+      queryClient.invalidateQueries({ queryKey: ["/api/credits/me"] });
+      const low = /recharge|credits/i.test(err.message);
+      toast({ title: low ? "Not enough credits" : "Prediction Failed", description: err.message, variant: "destructive",
+        action: low ? (<ToastAction altText="Recharge" onClick={() => setLocation("/plans")}>Recharge</ToastAction>) : undefined });
     },
   });
 
@@ -380,6 +387,8 @@ export default function Predictions() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <CostPreview kind={predType === "stock" ? "stock" : "crypto"} symbol={symbol} when={getTargetDateFromHorizon()} style={mode} riskLevel={riskLevel} />
 
                 <Button className="w-full" onClick={() => predictMutation.mutate()} disabled={!symbol || predictMutation.isPending}>
                   {predictMutation.isPending ? "Generating prediction..." :

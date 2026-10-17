@@ -1,3 +1,4 @@
+import { pool } from "./db";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -6,7 +7,11 @@ import { registerPasswordResetRoutes } from "./passwordReset";
 import { longTermStatsService, LONG_TERM_DAYS } from "./longTermStatsService";
 import { statisticalAnalysisService } from "./statisticalAnalysisService";
 import { registerPaymentRoutes, isPaywallOn } from "./payments";
-import { registerReferralRoutes, usableCredits } from "./referrals";
+import { registerReferralRoutes } from "./referrals";
+import { registerCreditRoutes, chargeOrReject, refundCharge, quotePrediction, getUserPrefs } from "./credits";
+import { registerUserSettingsRoutes } from "./userSettings";
+import { enterRequestOptions } from "./requestOptions";
+import { outlookCost } from "./creditPricing";
 import { insertSubscriptionSchema, insertFeedbackSchema, insertPredictionSchema, insertWatchlistSchema } from "@shared/schema";
 import { stockDataService } from "./stockDataService";
 import { cryptoDataService } from "./cryptoDataService";
@@ -274,7 +279,9 @@ export function registerRoutes(app: Express): Server {
   setupAuth(app);
   registerPasswordResetRoutes(app);
   registerReferralRoutes(app);
-  registerPaymentRoutes(app, { parseBillingInput, calculateStock: calculateBullwiserPrice, calculateCrypto: calculateCryptoBillingPrice });
+  registerPaymentRoutes(app);
+  registerCreditRoutes(app);
+  registerUserSettingsRoutes(app);
 
   app.get('/api/warmup', async (req, res) => {
     try {
@@ -299,7 +306,7 @@ export function registerRoutes(app: Express): Server {
       const parsed = parseBillingInput(req.body, 'stock');
       if ('error' in parsed) return res.status(400).json({ message: parsed.error });
       const { mode, tradeType, tradesPerDay, duration } = parsed.value;
-      const referralCount = req.isAuthenticated?.() ? await usableCredits(req.user.id) : 0; // from the database, not the browser
+      const referralCount = 0;
       res.json(calculateBullwiserPrice(mode, tradeType, tradesPerDay, duration, referralCount));
     } catch (error) {
       res.status(500).json({ message: "Error calculating price" });
@@ -311,7 +318,7 @@ export function registerRoutes(app: Express): Server {
       const parsed = parseBillingInput(req.body, 'crypto');
       if ('error' in parsed) return res.status(400).json({ message: parsed.error });
       const { mode, tradesPerDay, cryptoValue, duration } = parsed.value;
-      const referralCount = req.isAuthenticated?.() ? await usableCredits(req.user.id) : 0;
+      const referralCount = 0;
       res.json(calculateCryptoBillingPrice(mode, tradesPerDay, cryptoValue, duration, referralCount));
     } catch (error) {
       res.status(500).json({ message: "Error calculating crypto billing price" });
@@ -327,18 +334,18 @@ export function registerRoutes(app: Express): Server {
       if (!validHorizons.includes(horizon)) {
         return res.status(400).json({ message: `Invalid horizon. Use one of: ${validHorizons.join(', ')}` });
       }
-      const userSubscriptions = await storage.getUserSubscriptions(userId);
-      const now = new Date();
-      const hasActiveSub = userSubscriptions.some(s => new Date(s.endTs * 1000) > now);
-      if (isPaywallOn() && !hasActiveSub) {
-        return res.status(403).json({ message: 'Active subscription required to access market outlook', error: 'SUBSCRIPTION_REQUIRED', subscriptionType: 'any' });
-      }
+      const prefs = await getUserPrefs(userId);
+      enterRequestOptions(prefs);
+      const oCharge = await chargeOrReject(req, res, outlookCost(horizon), `Market outlook (${horizon})`, { kind: 'outlook', horizon });
+      if (!oCharge) return;
+      req._charge = oCharge;
       console.log(`[Outlook] User ${userId} requesting ${horizon} ${type} outlook`);
       const outlook = await marketOutlookService.generateOutlook(horizon);
       const response: any = { generatedAt: outlook.generatedAt, horizon: outlook.horizon, targetDate: outlook.targetDate, daysAhead: outlook.daysAhead, marketSummary: outlook.marketSummary, stocks: outlook.stocks, crypto: outlook.crypto, stocksLocked: false, cryptoLocked: false };
       return res.json(response);
     } catch (error) {
       console.error('Market outlook error:', error);
+      await refundCharge(req, req._charge, 'market outlook failed');
       res.status(500).json({ message: 'Error generating market outlook' });
     }
   });
@@ -347,11 +354,8 @@ export function registerRoutes(app: Express): Server {
     try {
       const { stock = 'TCS', when } = req.body;
       const userId = req.user.id;
-      const userSubscriptions = await storage.getUserSubscriptions(userId);
-      const activeStockSubscription = userSubscriptions.find(sub => !String(sub.mode).startsWith('crypto') && new Date(sub.endTs * 1000) > new Date());
-      if (isPaywallOn() && !activeStockSubscription) {
-        return res.status(403).json({ message: "Active stock subscription required", error: "SUBSCRIPTION_REQUIRED", subscriptionType: "stock" });
-      }
+      const prefs = await getUserPrefs(userId);
+      enterRequestOptions(prefs);
       const whenDate = parseWhen(when);
       if (!whenDate) return res.status(400).json({ message: "Invalid date in 'when'" });
       const upperSymbol = String(stock).toUpperCase();
@@ -367,6 +371,11 @@ export function registerRoutes(app: Express): Server {
         return res.status(503).json({ message: `Live market data for "${upperSymbol}" is currently unavailable.`, error: "QUOTE_UNAVAILABLE", symbol: upperSymbol });
       }
       const currentPrice = realTimeQuote.lastPrice;
+      // Credits: price depends on style, risk, engines on, horizon and the size of the possible move
+      const cost = await quotePrediction(userId, 'stock', upperSymbol, whenDate, req.body.mode, req.body.riskLevel);
+      const charge = await chargeOrReject(req, res, cost, `Stock prediction ${upperSymbol}`, { kind: 'stock', symbol: upperSymbol, mode: req.body.mode, risk: req.body.riskLevel, lines: cost.lines });
+      if (!charge) return;
+      req._charge = charge;
       const historicalData = await stockDataService.getHistoricalData(upperSymbol, LONG_TERM_DAYS);
       
       // ★ Calculate time-based risk multiplier
@@ -439,7 +448,7 @@ export function registerRoutes(app: Express): Server {
       
       const isDevMode = process.env.NODE_ENV === 'development';
       const showAstroDetails = isDevMode && req.user?.role === 'developer';
-      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astrologyBias: realTimeQuote.astrologyBias || 0, horaInfluence: realTimeQuote.horaInfluence, astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
+      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astrologyBias: realTimeQuote.astrologyBias || 0, horaInfluence: realTimeQuote.horaInfluence, astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
       
       const statisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Standard technical analysis applied';
       const astroReasoning = enhancedPrediction.astroRecommendation || (enhancedPrediction.warnings?.length > 0 ? enhancedPrediction.warnings.join('; ') : null);
@@ -452,6 +461,7 @@ export function registerRoutes(app: Express): Server {
       return res.json(finalPrediction);
     } catch (error) {
       console.error('Prediction error:', error);
+      await refundCharge(req, req._charge, 'prediction failed');
       return res.status(500).json({ message: "An error occurred while generating the prediction.", error: "PREDICTION_ERROR" });
     }
   });
@@ -460,16 +470,18 @@ export function registerRoutes(app: Express): Server {
     try {
       const { crypto: cryptoSymbol = 'BTC', when, mode = 'suggestion', riskLevel = 'high' } = req.body;
       const userId = req.user.id;
-      const cryptoSubs = await storage.getUserSubscriptions(userId);
-      if (isPaywallOn() && !cryptoSubs.some(sub => String(sub.mode).startsWith('crypto') && new Date(sub.endTs * 1000) > new Date())) {
-        return res.status(403).json({ message: "Active crypto subscription required", error: "SUBSCRIPTION_REQUIRED", subscriptionType: "crypto" });
-      }
+      const prefs = await getUserPrefs(userId);
+      enterRequestOptions(prefs);
       const cryptoQuote = await cryptoDataService.getCryptoQuote(cryptoSymbol.toUpperCase());
       if (!cryptoQuote) return res.status(404).json({ message: "Cryptocurrency not found" });
       
       const whenDate = parseWhen(when);
       if (!whenDate) return res.status(400).json({ message: "Invalid date in 'when'" });
       const currentPrice = cryptoQuote.adjustedPrice || cryptoQuote.lastPrice;
+      const cCost = await quotePrediction(userId, 'crypto', String(cryptoSymbol), whenDate, mode, riskLevel);
+      const cCharge = await chargeOrReject(req, res, cCost, `Crypto prediction ${String(cryptoSymbol).toUpperCase()}`, { kind: 'crypto', symbol: String(cryptoSymbol).toUpperCase(), mode, risk: riskLevel, lines: cCost.lines });
+      if (!cCharge) return;
+      req._charge = cCharge;
 
       console.log(`[CryptoPredict] Generating prediction for ${cryptoSymbol} with target date: ${whenDate.toISOString()}`);
       
@@ -489,7 +501,7 @@ export function registerRoutes(app: Express): Server {
         predLow = cr.low; predHigh = cr.high;
       }
       
-      const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based crypto analysis', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, livePriceAvailable: currentPrice > 0 };
+      const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based crypto analysis', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, livePriceAvailable: currentPrice > 0 };
       
       const cryptoStatisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Crypto technical analysis with volatility adjustment';
       const cryptoAstroReasoning = enhancedPrediction.astroRecommendation || null;
@@ -502,49 +514,7 @@ export function registerRoutes(app: Express): Server {
       return res.json(finalPrediction);
     } catch (error) {
       console.error('Crypto prediction error:', error);
-      res.status(500).json({ message: "Error generating crypto prediction" });
-    }
-  });
-
-  app.post('/api/crypto/predict/generate', isAuthenticated, async (req: any, res) => {
-    try {
-      const { subscriptionId, crypto: cryptoSymbol = 'BTC', when } = req.body;
-      const userId = req.user.id;
-      let subscription: any = null;
-      if (isPaywallOn()) {
-        subscription = await storage.getSubscription(subscriptionId);
-        if (!subscription || subscription.userId !== userId || !String(subscription.mode).startsWith('crypto')) return res.status(403).json({ message: "Invalid or unauthorized subscription" });
-        if (subscription.endTs < Math.floor(Date.now() / 1000)) return res.status(403).json({ message: "Subscription expired" });
-      }
-      const whenDate = parseWhen(when);
-      if (!whenDate) return res.status(400).json({ message: "Invalid date in 'when'" });
-      const cryptoQuote = await cryptoDataService.getCryptoQuote(cryptoSymbol.toUpperCase());
-      if (!cryptoQuote) return res.status(404).json({ message: "Cryptocurrency not found" });
-      const currentPrice = cryptoQuote.adjustedPrice || cryptoQuote.lastPrice;
-      
-      // ★ Calculate time-based risk multiplier
-      const riskMultiplier = getTimeScaledRiskMultiplier(whenDate, req.body.riskLevel || 'high', false);
-      
-      const historicalData = await cryptoDataService.getCryptoHistoricalData(cryptoSymbol.toUpperCase(), 30);
-      const enhancedPrediction = await aiService.generateEnhancedCryptoPrediction(cryptoSymbol.toUpperCase(), currentPrice, userId, historicalData, cryptoQuote, whenDate);
-      
-      // ★ Apply time scaling
-      const sr = computePriceRange(currentPrice, enhancedPrediction, riskMultiplier, req.body.riskLevel || 'high');
-      const predLow = sr.low, predHigh = sr.high;
-      
-      const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, subscriptionId };
-      
-      const cryptoStatisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Crypto technical analysis with volatility adjustment';
-      const cryptoAstroReasoning = enhancedPrediction.astroRecommendation || null;
-      
-      // This route previously read planets off the array as if it were an object (always null)
-      // and used fields that don't exist (horaLord, currentNakshatra). Use the shared builder.
-      const cryptoPlanetaryData = await buildPlanetaryData(whenDate);
-
-      await storage.createPrediction({ aiLearning: enhancedPrediction.learningSnapshot || null, userId, stock: `CRYPTO_${finalPrediction.crypto}`, currentPrice: finalPrediction.currentPrice, predLow: finalPrediction.predLow, predHigh: finalPrediction.predHigh, confidence: finalPrediction.confidence, mode: subscription?.mode || 'suggestion', riskLevel: req.body.riskLevel || 'high', targetDate: whenDate, statisticalReasoning: cryptoStatisticalReasoning, astroReasoning: cryptoAstroReasoning, planetaryData: cryptoPlanetaryData });
-      
-      return res.json(finalPrediction);
-    } catch (error) {
+      await refundCharge(req, req._charge, 'crypto prediction failed');
       res.status(500).json({ message: "Error generating crypto prediction" });
     }
   });
@@ -559,6 +529,23 @@ export function registerRoutes(app: Express): Server {
       console.error('[API] Error fetching prediction history:', error);
       res.status(500).json({ message: 'Error fetching prediction history' });
     }
+  });
+
+  // Calibration: when BullWiser says "70% confident", how often did the real price land inside the predicted range?
+  app.get('/api/predictions/calibration', isAuthenticated, async (req: any, res) => {
+    try {
+      const r = await pool.query(
+        `SELECT confidence, pred_low AS lo, pred_high AS hi, actual_price AS actual
+           FROM predictions WHERE user_id = $1 AND actual_price IS NOT NULL AND pred_low IS NOT NULL AND pred_high IS NOT NULL`, [req.user.id]);
+      const edges = [0, 40, 50, 60, 70, 101];
+      const buckets = edges.slice(0, -1).map((lo, i) => ({ label: i === edges.length - 2 ? `${lo}%+` : `${lo}–${edges[i + 1] - 1}%`, lo, hi: edges[i + 1], n: 0, hit: 0 }));
+      for (const row of r.rows) {
+        const b = buckets.find(x => Number(row.confidence) >= x.lo && Number(row.confidence) < x.hi);
+        if (!b) continue;
+        b.n++; if (Number(row.actual) >= Number(row.lo) && Number(row.actual) <= Number(row.hi)) b.hit++;
+      }
+      res.json({ total: r.rows.length, buckets: buckets.map(b => ({ label: b.label, n: b.n, hitRatePct: b.n ? Math.round((b.hit / b.n) * 100) : null })) });
+    } catch (e) { res.status(500).json({ message: 'Error computing calibration' }); }
   });
 
   app.get('/api/predictions/stats', isAuthenticated, async (req: any, res) => {
@@ -1070,8 +1057,8 @@ export function registerRoutes(app: Express): Server {
       if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') {
         return res.status(400).json({ message: "Current and new password are required" });
       }
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Password must be at least 6 characters" });
+      if (newPassword.length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
       }
       const [userRecord] = await db.select().from(users).where(eq(users.id, userId));
       if (!userRecord) return res.status(404).json({ message: "User not found" });

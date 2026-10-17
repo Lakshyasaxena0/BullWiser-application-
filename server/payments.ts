@@ -1,14 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Razorpay payments for BullWiser subscriptions (INR only).
+// Razorpay payments for BullWiser CREDITS (INR only, 1 credit = ₹10).
 //
 // Flow:
-//   1. POST /api/payments/create-order  → server prices the plan itself, creates a Razorpay order,
-//                                         stores a `payments` row (status "created").
+//   1. POST /api/credits/create-order → server prices the pack itself, creates a Razorpay order,
+//                                       stores a `payments` row (status "created").
 //   2. Browser opens Razorpay Checkout with that order.
-//   3. POST /api/payments/verify        → server checks the HMAC signature AND asks Razorpay for the
-//                                         payment, then activates the subscription.
-//   4. POST /api/payments/webhook       → Razorpay → server safety net (user closed the tab after paying).
-// A subscription is ONLY ever created by `fulfillOrder`, which is idempotent (row lock + unique ids).
+//   3. POST /api/payments/verify      → server checks the HMAC signature AND asks Razorpay for the
+//                                       payment, then adds the credits to the wallet.
+//   4. POST /api/payments/webhook     → Razorpay → server safety net (user closed the tab after paying).
+// Credits are ONLY ever added by `fulfillOrder`, which is idempotent (row lock + unique ids).
 //
 // Env vars: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,7 +17,9 @@ import axios from "axios";
 import type { Express, Request, Response } from "express";
 import { pool } from "./db";
 import { isAuthenticated } from "./auth";
-import { ensureReferralTables, usableCredits, redeemCredits, rewardReferrer } from "./referrals";
+import { ensureReferralTables, rewardReferrerWithCredits } from "./referrals";
+import { ensureWalletTables, addCredits } from "./wallet";
+import { CREDIT_RUPEES } from "./creditPricing";
 
 const RAZORPAY_API = process.env.RAZORPAY_API_URL || "https://api.razorpay.com/v1";
 const keyId = () => process.env.RAZORPAY_KEY_ID || "";
@@ -28,6 +30,7 @@ export const isPaymentsConfigured = () => Boolean(keyId() && keySecret());
 /**
  * Paywall switch. PAYWALL_ENABLED=true forces it ON, =false forces it OFF.
  * If unset, the paywall turns ON automatically as soon as the Razorpay keys are present.
+ * While OFF, predictions are free and no credits are deducted.
  */
 export const isPaywallOn = () => {
   const f = (process.env.PAYWALL_ENABLED || '').trim().toLowerCase();
@@ -35,14 +38,6 @@ export const isPaywallOn = () => {
   if (f === 'false') return false;
   return isPaymentsConfigured();
 };
-
-const DURATION_SECONDS: Record<string, number> = { daily: 86400, weekly: 7 * 86400, monthly: 30 * 86400, yearly: 365 * 86400 };
-
-export interface PaymentDeps {
-  parseBillingInput: (body: any, kind: "stock" | "crypto") => { error: string } | { value: any };
-  calculateStock: (mode: string, tradeType: string, tradesPerDay: number, duration: string, referralCount: number) => any;
-  calculateCrypto: (mode: string, tradesPerDay: number, cryptoValue: number, duration: string, referralCount: number) => any;
-}
 
 let tableReady: Promise<void> | null = null;
 function ensureTables(): Promise<void> {
@@ -66,9 +61,8 @@ function ensureTables(): Promise<void> {
           paid_at TIMESTAMP
         )`);
       await pool.query("CREATE INDEX IF NOT EXISTS payments_user_idx ON payments (user_id)");
-      await pool.query("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS currency VARCHAR NOT NULL DEFAULT 'INR'");
-      await pool.query("ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_id INTEGER");
       await ensureReferralTables();
+      await ensureWalletTables();
     })().catch((e) => { tableReady = null; throw e; });
   }
   return tableReady;
@@ -83,8 +77,22 @@ function safeEqualHex(a: string, b: string): boolean {
 }
 const hmacHex = (secret: string, payload: string | Buffer) => crypto.createHmac("sha256", secret).update(payload).digest("hex");
 
-/** Activate the subscription for a paid order. Safe to call many times / concurrently. */
-export async function fulfillOrder(orderId: string, paymentId: string, paidAmountPaise: number): Promise<{ subscriptionId: number; alreadyDone: boolean }> {
+/** Create a Razorpay order for `credits` credits. The price is computed HERE, never taken from the browser. */
+export async function createCreditOrder(userId: string, credits: number) {
+  if (!isPaymentsConfigured()) throw Object.assign(new Error("not configured"), { status: 503 });
+  await ensureTables();
+  const amountPaise = credits * CREDIT_RUPEES * 100;
+  const receipt = `bw_${userId.slice(0, 8)}_${Date.now().toString(36)}`;
+  const order = (await rzp("post", "/orders", { amount: amountPaise, currency: "INR", receipt, notes: { userId, kind: "credits", credits: String(credits) } })).data;
+  await pool.query(
+    "INSERT INTO payments (user_id, razorpay_order_id, amount_paise, currency, kind, plan) VALUES ($1,$2,$3,'INR','credits',$4)",
+    [userId, order.id, amountPaise, JSON.stringify({ credits })]
+  );
+  return { orderId: order.id, amount: amountPaise, currency: "INR", keyId: keyId(), name: "BullWiser", description: `${credits} BullWiser credits`, credits };
+}
+
+/** Add the purchased credits for a paid order. Safe to call many times / concurrently. */
+export async function fulfillOrder(orderId: string, paymentId: string, paidAmountPaise: number): Promise<{ credits: number; balance: number; alreadyDone: boolean }> {
   await ensureTables();
   const client = await pool.connect();
   try {
@@ -92,31 +100,21 @@ export async function fulfillOrder(orderId: string, paymentId: string, paidAmoun
     const { rows } = await client.query("SELECT * FROM payments WHERE razorpay_order_id = $1 FOR UPDATE", [orderId]);
     const pay = rows[0];
     if (!pay) throw new Error("Unknown order");
-    if (pay.status === "paid" && pay.subscription_id) {
+    const credits = Number(pay.plan?.credits) || 0;
+    if (pay.status === "paid") {
+      const b = await client.query("SELECT balance FROM credit_wallets WHERE user_id = $1", [pay.user_id]);
       await client.query("COMMIT");
-      return { subscriptionId: pay.subscription_id, alreadyDone: true };
+      return { credits, balance: Number(b.rows[0]?.balance) || 0, alreadyDone: true };
     }
+    if (pay.kind !== "credits" || credits < 1) throw new Error("Unsupported order type");
     if (paidAmountPaise !== pay.amount_paise) throw new Error(`Amount mismatch (paid ${paidAmountPaise}, expected ${pay.amount_paise})`);
 
-    const plan = pay.plan;
-    const startTs = Math.floor(Date.now() / 1000);
-    const endTs = startTs + (DURATION_SECONDS[plan.duration] || DURATION_SECONDS.monthly);
-    const sub = await client.query(
-      `INSERT INTO subscriptions (user_id, mode, trade_type, trades_per_day, duration, start_ts, end_ts, price, currency, payment_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [pay.user_id, plan.dbMode, plan.dbTradeType, plan.tradesPerDay, plan.duration, startTs, endTs, Math.round(pay.amount_paise / 100), pay.currency, pay.id]
-    );
-    // Referral bookkeeping (same transaction): spend the credits this payment used, and
-    // reward whoever invited the buyer (their first paid payment earns the inviter a credit).
-    if (plan.creditsUsed > 0) await redeemCredits(client, pay.user_id, plan.creditsUsed, pay.id);
-    await rewardReferrer(client, pay.user_id, pay.id);
-    await client.query(
-      "UPDATE payments SET status='paid', razorpay_payment_id=$2, subscription_id=$3, paid_at=now(), failure_reason=NULL WHERE id=$1",
-      [pay.id, paymentId, sub.rows[0].id]
-    );
+    const balance = await addCredits(client, pay.user_id, credits, "purchase", `Bought ${credits} credits`, { orderId, paymentId, paymentRowId: pay.id });
+    await rewardReferrerWithCredits(client, pay.user_id, pay.id);   // the buyer's FIRST purchase rewards whoever invited them
+    await client.query("UPDATE payments SET status='paid', razorpay_payment_id=$2, paid_at=now(), failure_reason=NULL WHERE id=$1", [pay.id, paymentId]);
     await client.query("COMMIT");
-    console.log(`[Payments] Order ${orderId} paid (${paymentId}) → subscription ${sub.rows[0].id}`);
-    return { subscriptionId: sub.rows[0].id, alreadyDone: false };
+    console.log(`[Payments] Order ${orderId} paid (${paymentId}) → +${credits} credits, balance ${balance}`);
+    return { credits, balance, alreadyDone: false };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     throw e;
@@ -125,49 +123,12 @@ export async function fulfillOrder(orderId: string, paymentId: string, paidAmoun
   }
 }
 
-export function registerPaymentRoutes(app: Express, deps: PaymentDeps) {
+export function registerPaymentRoutes(app: Express) {
   ensureTables().catch((e) => console.error("[Payments] Could not prepare tables:", e?.message || e));
 
   // Public config for the checkout button
   app.get("/api/payments/config", (_req, res) => {
     res.json({ enabled: isPaymentsConfigured(), paywall: isPaywallOn(), keyId: isPaymentsConfigured() ? keyId() : null, currency: "INR" });
-  });
-
-  // 1. Create an order. The PRICE IS COMPUTED HERE — anything price-like from the browser is ignored.
-  app.post("/api/payments/create-order", isAuthenticated, async (req: any, res: Response) => {
-    try {
-      if (!isPaymentsConfigured()) return res.status(503).json({ message: "Payments are not configured yet. Please try again later." });
-      await ensureTables();
-      const kind = req.body?.kind === "crypto" ? "crypto" : "stock";
-      const parsed = deps.parseBillingInput({ duration: "monthly", ...req.body }, kind);
-      if ("error" in parsed) return res.status(400).json({ message: parsed.error });
-      const v = parsed.value;
-      // Referral discount comes from the DATABASE (credits earned when friends paid) — never from the browser
-      const credits = await usableCredits(req.user.id);
-      const bill = kind === "stock"
-        ? deps.calculateStock(v.mode, v.tradeType, v.tradesPerDay, v.duration, credits)
-        : deps.calculateCrypto(v.mode, v.tradesPerDay, v.cryptoValue, v.duration, credits);
-      const amountRupees = Math.round(bill.finalBill);
-      if (!Number.isFinite(amountRupees) || amountRupees < 1) return res.status(400).json({ message: "Invalid plan price" });
-      const amountPaise = amountRupees * 100;
-
-      const plan = {
-        duration: v.duration, tradesPerDay: v.tradesPerDay, mode: v.mode, tradeType: kind === "stock" ? v.tradeType : "crypto",
-        dbMode: kind === "stock" ? v.mode : `crypto-${v.mode}`, dbTradeType: kind === "stock" ? v.tradeType : "crypto",
-        cryptoValue: kind === "crypto" ? v.cryptoValue : undefined,
-        creditsUsed: credits,
-      };
-      const receipt = `bw_${req.user.id.slice(0, 8)}_${Date.now().toString(36)}`;
-      const order = (await rzp("post", "/orders", { amount: amountPaise, currency: "INR", receipt, notes: { userId: req.user.id, kind, duration: v.duration } })).data;
-      await pool.query(
-        "INSERT INTO payments (user_id, razorpay_order_id, amount_paise, currency, kind, plan) VALUES ($1,$2,$3,'INR',$4,$5)",
-        [req.user.id, order.id, amountPaise, kind, JSON.stringify(plan)]
-      );
-      res.json({ orderId: order.id, amount: amountPaise, currency: "INR", keyId: keyId(), invoice: bill, name: "BullWiser", description: `${kind === "crypto" ? "Crypto" : "Stock"} plan – ${v.duration}` });
-    } catch (e: any) {
-      console.error("[Payments] create-order failed:", e?.response?.data || e?.message || e);
-      res.status(502).json({ message: "Could not start the payment. Please try again." });
-    }
   });
 
   // 2. Browser reports a finished payment → we verify it ourselves
@@ -188,13 +149,13 @@ export function registerPaymentRoutes(app: Express, deps: PaymentDeps) {
       // Double-check with Razorpay itself: right order, right amount, money actually captured
       const p = (await rzp("get", `/payments/${encodeURIComponent(paymentId)}`)).data;
       if (p.order_id !== orderId || p.currency !== "INR") return res.status(400).json({ message: "Payment does not match the order" });
-      if (p.status !== "captured") return res.status(409).json({ message: `Payment is ${p.status}. If money was deducted it will activate automatically.` });
+      if (p.status !== "captured") return res.status(409).json({ message: `Payment is ${p.status}. If money was deducted the credits will be added automatically.` });
 
       const done = await fulfillOrder(orderId, paymentId, p.amount);
-      res.json({ status: "ok", subscriptionId: done.subscriptionId });
+      res.json({ status: "ok", credits: done.credits, balance: done.balance });
     } catch (e: any) {
       console.error("[Payments] verify failed:", e?.response?.data || e?.message || e);
-      res.status(500).json({ message: "Could not confirm the payment. If money was deducted, your plan will activate automatically within a few minutes." });
+      res.status(500).json({ message: "Could not confirm the payment. If money was deducted, your credits will be added automatically within a few minutes." });
     }
   });
 
@@ -228,7 +189,7 @@ export function registerPaymentRoutes(app: Express, deps: PaymentDeps) {
       await ensureTables();
       const { rows } = await pool.query(
         `SELECT id, razorpay_order_id AS "orderId", razorpay_payment_id AS "paymentId", amount_paise / 100 AS amount, currency, status, kind,
-                subscription_id AS "subscriptionId", created_at AS "createdAt", paid_at AS "paidAt"
+                (plan->>'credits')::int AS credits, created_at AS "createdAt", paid_at AS "paidAt"
          FROM payments WHERE user_id = $1 ORDER BY id DESC LIMIT 50`, [req.user.id]);
       res.json(rows);
     } catch { res.status(500).json({ message: "Error fetching payments" }); }

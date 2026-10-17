@@ -35,7 +35,7 @@ export default function ResetPasswordPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (password.length < 6) return setError("Password must be at least 6 characters");
+    if (password.length < 8) return setError("Password must be at least 8 characters");
     if (password !== confirm) return setError("Passwords do not match");
     setBusy(true);
     try {
@@ -80,12 +80,12 @@ export default function ResetPasswordPage() {
               <div className="space-y-2">
                 <Label htmlFor="new-password">New password</Label>
                 <PasswordInput id="new-password" value={password} onChange={(e) => setPassword(e.target.value)}
-                  minLength={6} required autoComplete="new-password" placeholder="Minimum 6 characters" data-testid="input-new-password" />
+                  minLength={8} required autoComplete="new-password" placeholder="Minimum 8 characters" data-testid="input-new-password" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-password">Confirm new password</Label>
                 <PasswordInput id="confirm-password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
-                  minLength={6} required autoComplete="new-password" placeholder="Re-enter your password" data-testid="input-confirm-password" />
+                  minLength={8} required autoComplete="new-password" placeholder="Re-enter your password" data-testid="input-confirm-password" />
               </div>
               {error && <p className="text-sm text-red-600" data-testid="text-reset-error">{error}</p>}
               <Button type="submit" className="w-full" disabled={busy} data-testid="button-reset-password">

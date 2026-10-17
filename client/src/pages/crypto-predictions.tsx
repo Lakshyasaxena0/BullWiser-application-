@@ -1,4 +1,5 @@
 import VedicInsightsCard from "@/components/VedicInsightsCard";
+import { CostPreview } from "@/components/CostPreview";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
@@ -77,8 +78,10 @@ export default function CryptoPredictions() {
         description: `${data.crypto} prediction completed with ${data.confidence}% confidence`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/user/predictions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/credits/me"] });
     },
     onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/credits/me"] });
       toast({
         title: "Prediction Failed",
         description: error.message || "Failed to generate crypto prediction",
@@ -183,11 +186,11 @@ export default function CryptoPredictions() {
           </div>
         </div>
         <Button
-          onClick={() => setLocation('/crypto-plans')}
+          onClick={() => setLocation('/plans')}
           className="bg-orange-500 hover:bg-orange-600 text-white"
         >
           <Bitcoin className="h-4 w-4 mr-1" />
-          Crypto Plans
+          Recharge Credits
         </Button>
       </div>
 
@@ -337,6 +340,8 @@ export default function CryptoPredictions() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <CostPreview kind="crypto" symbol={cryptoSymbol} when={predictionTime ? new Date(predictionTime).toISOString() : new Date(Date.now() + 86400000).toISOString()} style={mode} riskLevel={riskLevel} />
 
                 <Button 
                   onClick={handleGeneratePrediction}

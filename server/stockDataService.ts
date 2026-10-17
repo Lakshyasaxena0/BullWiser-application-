@@ -318,6 +318,24 @@ export class StockDataService {
     }
   }
 
+  /** Daily bars for ANY Yahoo ticker (e.g. ^NSEI, ^INDIAVIX, BTC-USD). Cached; [] on failure. */
+  async getYahooSeries(yahooSymbol: string, days: number): Promise<any[]> {
+    const cacheKey = `series_${yahooSymbol}_${days}`;
+    if (this.isCacheValid(cacheKey)) return this.getCachedData(cacheKey);
+    try {
+      const startDate = new Date(); startDate.setDate(startDate.getDate() - days);
+      const result = await yahooFinance.chart(yahooSymbol, { period1: startDate, period2: new Date(), interval: '1d' }, { validateResult: false });
+      const data = (result?.quotes || []).filter((q: any) => q && q.close != null);
+      const out = data.map((q: any) => ({
+        date: q.date, open: q.open ?? q.close, high: q.high ?? q.close, low: q.low ?? q.close, close: q.close, volume: q.volume ?? 0,
+        CH_CLOSING_PRICE: q.close, CH_OPENING_PRICE: q.open ?? q.close, CH_TRADE_HIGH_PRICE: q.high ?? q.close, CH_TRADE_LOW_PRICE: q.low ?? q.close,
+        CH_TOT_TRADED_QTY: q.volume ?? 0, CH_TIMESTAMP: q.date,
+      }));
+      if (out.length) this.setCacheData(cacheKey, out);
+      return out;
+    } catch (e: any) { console.error(`[Yahoo] series ${yahooSymbol} failed:`, e?.message || e); return []; }
+  }
+
   async getHistoricalData(symbol: string, days: number = 30): Promise<any[]> {
     const cacheKey = `historical_${symbol}_${days}`;
     if (this.isCacheValid(cacheKey)) return this.getCachedData(cacheKey);

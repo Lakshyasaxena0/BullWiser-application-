@@ -17,9 +17,9 @@ Create a Web Service from this repo (`render.yaml` has the settings). Build: `np
 
 Environment variables:
 `DATABASE_URL`, `SESSION_SECRET`, `APP_URL` (your Render URL), `ALLOWED_ORIGINS`, `Groq_API_key`, `BREVO_API_KEY`, `MAIL_FROM`,
-`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, optional `COINGECKO_API_KEY`, `FINNHUB_API_KEY`, `PAYWALL_ENABLED`.
+`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, optional `WELCOME_CREDITS` (free credits for new users, default 0), `REFERRAL_BONUS_CREDITS` (default 20), optional `COINGECKO_API_KEY`, `FINNHUB_API_KEY`, `PAYWALL_ENABLED`.
 
-**Payment wall:** it switches on automatically as soon as `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set. Until then the plan buttons show "Payments coming soon" and predictions are free. Force it with `PAYWALL_ENABLED=true` / `false`.
+**Payment wall:** it switches on automatically as soon as `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set. Until then the buy buttons show "Payments coming soon" and predictions are free (no credits are deducted). Force it with `PAYWALL_ENABLED=true` / `false`.
 
 **AI:** Groq (llama-3.3-70b) writes the conclusion. If Groq is down, slow or has no key, the built-in formula engine (statistics + astrology weights) answers instead — the app never stops predicting.
 
@@ -33,6 +33,14 @@ Local: `cd mobile && npm install && npm run apk` (needs Android SDK + JDK 17).
 ## 4. Build the Windows installer
 GitHub → Actions → **Build Windows installer** → Run workflow → download the `.exe` files. Use `ia32` for 32-bit/Windows 7, `x64` for 64-bit.
 Local: `cd desktop && npm install && npm run dist`. Electron 22 is the last version that runs on Windows 7/8.
+
+## Credits (pay-per-prediction)
+BullWiser runs on credits: **1 credit = ₹10**. Packs: 300 / 500 / 700 / 1200 / 1500 / 2000 credits, or a loose buy of 10–10,000 credits. Balance and history are on **Plans & Recharge**; when credits run out the user must recharge.
+
+A prediction costs `ceil((base + engines) × risk × horizon) + benefit tier` credits (min 1, max 40), shown **before** the user presses Predict (`POST /api/credits/quote`):
+base — stock suggestion 1, auto-trading 2, crypto 1.5 / 2.5 · engines — statistics +1, astrology +1.5, AI +1.5 (only if switched on in Settings) · risk — low ×1.0, medium ×1.2, high ×1.4 · horizon — ≤1d ×1.0 … >90d ×1.75 · benefit tier — +0 / +1 / +2 for small / medium / large possible move. Market Outlook costs 3–4 credits. Failed predictions are refunded automatically (once). A friend's first purchase gives the inviter bonus credits.
+
+Settings → Predictions: astrology on/off, AI on/off, and 👍/👎 + comment per prediction. Prediction Analytics shows a confidence-vs-real-result calibration chart.
 
 ## Astrology engine (`server/vedic/`)
 Real sidereal (Lahiri) planetary positions from `astronomy-engine`, real panchang (tithi, nakshatra, yoga, karana), sunrise-based hora / Rahu-Gulika-Yama kaal, ascendant with whole-sign houses. Interpretation: dignity, **retrograde**, **combustion**, **graha drishti (aspects)**, **parivartana (exchange)**, **mritu bhaga**, Jaimini and natural **karakas**, and planet/sign/house → product & sector mapping (every planet/sign signifies products and services). `npm run test:vedic` verifies the engine against known ingress and retrograde dates. Mritu bhaga degrees follow a commonly quoted table — have a qualified astrologer verify before relying on it.

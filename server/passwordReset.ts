@@ -137,7 +137,7 @@ export function registerPasswordResetRoutes(app: Express) {
     if (limited(req, 20, 15 * 60_000)) return res.status(429).json({ message: 'Too many attempts. Please try again later.' });
     const token = typeof req.body?.token === 'string' ? req.body.token : '';
     const password = req.body?.password;
-    if (typeof password !== 'string' || password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' });
     if (password.length > 128) return res.status(400).json({ message: 'Password is too long' });
     if (!/^[a-f0-9]{64}$/.test(token)) return res.status(400).json({ message: 'This reset link is invalid or has expired' });
 

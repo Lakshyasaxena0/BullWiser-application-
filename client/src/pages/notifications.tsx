@@ -39,8 +39,8 @@ export default function Header() {
   const getPageName = (path: string) => {
     const pages: Record<string, string> = {
       "/": "Dashboard", "/predictions": "Predictions", "/portfolio": "Portfolio",
-      "/subscription": "Subscription", "/notifications": "Notifications",
-      "/plans": "Plans", "/settings": "Settings", "/activities": "Activities",
+      "/subscription": "Plans & Recharge", "/notifications": "Notifications",
+      "/plans": "Plans & Recharge", "/settings": "Settings", "/activities": "Activities",
       "/trading-history": "Trading History", "/cryptocurrencies": "Cryptocurrencies",
       "/crypto-plans": "Crypto Plans", "/crypto-predictions": "Crypto Predictions",
       "/crypto-trading": "Crypto Trading",
@@ -98,8 +98,8 @@ export default function Header() {
               <DropdownMenuItem onClick={() => setLocation('/portfolio')}>
                 <User className="mr-2 h-4 w-4" /><span>Profile</span>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setLocation('/subscription')}>
-                <span className="mr-2">💎</span><span>Subscription</span>
+              <DropdownMenuItem onClick={() => setLocation('/plans')}>
+                <span className="mr-2">💎</span><span>Plans &amp; Recharge</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

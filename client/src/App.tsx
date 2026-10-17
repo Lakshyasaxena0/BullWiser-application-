@@ -10,7 +10,6 @@ import Dashboard from "@/pages/dashboard";
 import MobileDashboard from "@/pages/mobile-dashboard";
 import Predictions from "@/pages/predictions";
 import Portfolio from "@/pages/portfolio";
-import SubscriptionPage from "@/pages/subscription";
 import Notifications from "@/pages/notifications";
 import Plans from "@/pages/plans";
 import AuthPage from "@/pages/auth-page";
@@ -22,7 +21,6 @@ import Sidebar from "@/components/layout/sidebar";
 import Header from "@/components/layout/header";
 import ActivitiesPage from "@/pages/activities";
 import TradingHistoryPage from "@/pages/trading-history";
-import CryptoPlans from "./pages/crypto-plans";
 import MarketOutlook from "@/pages/market-outlook";
 import PredictionAnalytics from "@/pages/prediction-analytics"; // ★ NEW
 
@@ -80,7 +78,7 @@ function Router() {
         <Route path="/dashboard" component={MobileDashboard} />
         <Route path="/predictions" component={Predictions} />
         <Route path="/portfolio" component={Portfolio} />
-        <Route path="/subscription" component={SubscriptionPage} />
+        <Route path="/subscription"><Redirect to="/plans" /></Route>
         <Route path="/notifications" component={Notifications} />
         <Route path="/market-outlook" component={MarketOutlook} />
         <Route path="/prediction-analytics" component={PredictionAnalytics} /> {/* ★ NEW */}
@@ -89,7 +87,7 @@ function Router() {
         <Route path="/activities" component={ActivitiesPage} />
         <Route path="/activities/:id" component={ActivitiesPage} />
         <Route path="/trading-history" component={TradingHistoryPage} />
-        <Route path="/crypto-plans" component={CryptoPlans} />
+        <Route path="/crypto-plans"><Redirect to="/plans" /></Route>
         {/* The bottom nav links to these; they used to be 404s on phones */}
         <Route path="/cryptocurrencies"><Redirect to="/trading-history" /></Route>
         <Route path="/history"><Redirect to="/trading-history" /></Route>
@@ -111,7 +109,7 @@ function Router() {
             <Route path="/dashboard" component={Dashboard} />
             <Route path="/predictions" component={Predictions} />
             <Route path="/portfolio" component={Portfolio} />
-            <Route path="/subscription" component={SubscriptionPage} />
+        <Route path="/subscription"><Redirect to="/plans" /></Route>
             <Route path="/settings" component={SettingsPage} />
             <Route path="/notifications" component={Notifications} />
             <Route path="/auth" component={AuthPage} />
@@ -124,7 +122,7 @@ function Router() {
             <Route path="/cryptocurrencies">
               <Redirect to="/trading-history" />
             </Route>
-            <Route path="/crypto-plans" component={CryptoPlans} />
+        <Route path="/crypto-plans"><Redirect to="/plans" /></Route>
             <Route component={NotFound} />
           </Switch>
         </main>

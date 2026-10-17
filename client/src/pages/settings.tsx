@@ -15,6 +15,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { PredictionSettings } from "@/components/PredictionSettings";
 import { User, Settings, Bell, Shield, Trash2, Save, Camera, Lock, Key, Download, CheckCircle } from "lucide-react";
 
 export default function SettingsPage() {
@@ -173,8 +174,8 @@ export default function SettingsPage() {
       toast({ title: "Passwords don't match", description: "New password and confirm password must match.", variant: "destructive" });
       return;
     }
-    if (passwordForm.newPassword.length < 6) {
-      toast({ title: "Password too short", description: "Password must be at least 6 characters.", variant: "destructive" });
+    if (passwordForm.newPassword.length < 8) {
+      toast({ title: "Password too short", description: "Password must be at least 8 characters.", variant: "destructive" });
       return;
     }
     changePasswordMutation.mutate({ currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword });
@@ -202,8 +203,9 @@ export default function SettingsPage() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="profile"><User className="h-4 w-4 mr-1" />Profile</TabsTrigger>
+          <TabsTrigger value="predictions"><Key className="h-4 w-4 mr-1" />Predictions</TabsTrigger>
           <TabsTrigger value="notifications"><Bell className="h-4 w-4 mr-1" />Notifications</TabsTrigger>
           <TabsTrigger value="privacy"><Shield className="h-4 w-4 mr-1" />Privacy</TabsTrigger>
           <TabsTrigger value="account"><Settings className="h-4 w-4 mr-1" />Account</TabsTrigger>
@@ -333,6 +335,8 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="predictions"><PredictionSettings /></TabsContent>
 
         {/* ── Privacy Tab ────────────────────────────────────────────── */}
         <TabsContent value="privacy">
@@ -476,11 +480,11 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <Label>New Password</Label>
-              <PasswordInput placeholder="Min 6 characters" value={passwordForm.newPassword} onChange={e => setPasswordForm(p => ({ ...p, newPassword: e.target.value }))} required minLength={6} />
+              <PasswordInput placeholder="Min 8 characters" value={passwordForm.newPassword} onChange={e => setPasswordForm(p => ({ ...p, newPassword: e.target.value }))} required minLength={8} />
             </div>
             <div className="space-y-2">
               <Label>Confirm New Password</Label>
-              <PasswordInput placeholder="Re-enter new password" value={passwordForm.confirmPassword} onChange={e => setPasswordForm(p => ({ ...p, confirmPassword: e.target.value }))} required minLength={6} />
+              <PasswordInput placeholder="Re-enter new password" value={passwordForm.confirmPassword} onChange={e => setPasswordForm(p => ({ ...p, confirmPassword: e.target.value }))} required minLength={8} />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setShowPasswordDialog(false)}>Cancel</Button>

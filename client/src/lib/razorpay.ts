@@ -23,23 +23,19 @@ async function readError(res: Response, fallback: string): Promise<string> {
   try { const j = await res.json(); return j?.message || fallback; } catch { return fallback; }
 }
 
-export interface PayOptions {
-  kind: "stock" | "crypto";
-  plan: Record<string, any>;           // mode, tradeType, tradesPerDay, duration (+ cryptoValue for crypto). Price is computed on the server.
-  prefill?: { name?: string; email?: string };
-}
 export type PayResult =
-  | { status: "success"; subscriptionId: number }
+  | { status: "success"; credits: number; balance: number }
   | { status: "cancelled" };
 
 /**
- * Opens Razorpay Checkout. Resolves with "success" ONLY after the server has verified the payment and
- * activated the subscription. Rejects with an Error (message is safe to show) on any failure.
+ * Buys `credits` credits: asks the server for an order (the server computes the price), opens Razorpay Checkout,
+ * and resolves with "success" ONLY after the server has verified the payment and added the credits.
+ * Rejects with an Error (message is safe to show) on any failure.
  */
-export async function payForPlan({ kind, plan, prefill }: PayOptions): Promise<PayResult> {
+export async function payForCredits(credits: number, prefill?: { name?: string; email?: string }): Promise<PayResult> {
   let orderRes: Response;
   try {
-    orderRes = await apiRequest("POST", "/api/payments/create-order", { ...plan, kind });
+    orderRes = await apiRequest("POST", "/api/credits/create-order", { credits });
   } catch (e: any) {
     const raw = String(e?.message || "").replace(/^\d+:\s*/, "");
     let msg = raw;
@@ -79,9 +75,9 @@ export async function payForPlan({ kind, plan, prefill }: PayOptions): Promise<P
           });
           if (!res.ok) return reject(new Error(await readError(res, "Payment could not be confirmed")));
           const data = await res.json();
-          resolve({ status: "success", subscriptionId: data.subscriptionId });
+          resolve({ status: "success", credits: data.credits, balance: data.balance });
         } catch {
-          reject(new Error("Could not confirm the payment. If money was deducted, your plan will activate automatically within a few minutes."));
+          reject(new Error("Could not confirm the payment. If money was deducted, your credits will be added automatically within a few minutes."));
         }
       },
     });

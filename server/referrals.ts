@@ -1,21 +1,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Refer-a-friend. Rules:
+// Refer-a-friend (credit version). Rules (see below for the bonus size):
 //  • every user has a personal referral code (created on first use);
 //  • a new user can enter a friend's code at sign-up (link: /auth?ref=CODE);
-//  • the referrer earns ONE credit when that friend makes their FIRST PAID payment
+//  • the referrer earns bonus CREDITS (default 20) when that friend makes their FIRST credit purchase
 //    (sign-ups alone earn nothing, so fake accounts are worthless);
-//  • each credit = 10% off the referrer's next payment, up to 5 credits (50%) at once;
-//  • credits are consumed when the discounted payment succeeds.
-// The discount is always computed on the server from the database — never from the browser.
+//  • the bonus is added to the referrer's wallet in the same database transaction as the friend's payment.
 // ─────────────────────────────────────────────────────────────────────────────
 import { randomInt } from "crypto";
 import type { Express, Response } from "express";
 import { pool } from "./db";
 import { isAuthenticated } from "./auth";
+import { addCredits } from "./wallet";
 
-export const DISCOUNT_PER_REFERRAL_PCT = 10;
-export const MAX_CREDITS_PER_PAYMENT = 5; // 5 × 10% = 50% cap (same cap as the price formula)
-const OPEN_ORDER_WINDOW_MIN = 30;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 
 let ready: Promise<void> | null = null;
@@ -88,40 +84,19 @@ export async function attachReferral(newUserId: string, rawCode: unknown): Promi
   }
 }
 
-/** Credits the user can apply to a NEW order (minus credits already held by other open, unpaid orders). */
-export async function usableCredits(userId: string): Promise<number> {
-  await ensureReferralTables();
-  let held = 0;
-  try {
-    const h = await pool.query(
-      `SELECT COALESCE(SUM((plan->>'creditsUsed')::int), 0) AS held FROM payments
-        WHERE user_id = $1 AND status = 'created' AND created_at > now() - ($2 || ' minutes')::interval`,
-      [userId, String(OPEN_ORDER_WINDOW_MIN)]);
-    held = Number(h.rows[0]?.held) || 0;
-  } catch { /* payments table not created yet → nothing is held */ }
-  const r = await pool.query("SELECT count(*)::int AS n FROM referrals WHERE referrer_id = $1 AND status = 'rewarded'", [userId]);
-  return Math.max(0, Math.min(MAX_CREDITS_PER_PAYMENT, (Number(r.rows[0]?.n) || 0) - held));
-}
-
 type Q = { query: (sql: string, params?: any[]) => Promise<{ rows: any[] }> };
 
-/** Inside the payment transaction: spend credits used by this payment. */
-export async function redeemCredits(db: Q, userId: string, n: number, paymentRowId: number): Promise<number> {
-  if (!n || n < 1) return 0;
-  const r = await db.query(
-    `UPDATE referrals SET status = 'redeemed', redeemed_at = now(), redeemed_payment_id = $3
-      WHERE id IN (SELECT id FROM referrals WHERE referrer_id = $1 AND status = 'rewarded'
-                   ORDER BY rewarded_at LIMIT $2 FOR UPDATE SKIP LOCKED)
-      RETURNING id`, [userId, n, paymentRowId]);
-  return r.rows.length;
-}
+/** Credits the inviter earns when their friend makes the first credit purchase (env REFERRAL_BONUS_CREDITS, default 20 ≈ ₹200). */
+export const referralBonusCredits = () => Math.max(1, Math.min(500, parseInt(process.env.REFERRAL_BONUS_CREDITS || "20", 10) || 20));
 
-/** Inside the payment transaction: the buyer's FIRST paid payment rewards whoever referred them. */
-export async function rewardReferrer(db: Q, buyerId: string, paymentRowId: number): Promise<string | null> {
+/** Inside the payment transaction: the buyer's FIRST purchase gives whoever invited them bonus credits. */
+export async function rewardReferrerWithCredits(db: Q, buyerId: string, paymentRowId: number): Promise<string | null> {
   const r = await db.query(
-    `UPDATE referrals SET status = 'rewarded', rewarded_at = now(), trigger_payment_id = $2
+    `UPDATE referrals SET status = 'redeemed', rewarded_at = now(), redeemed_at = now(), trigger_payment_id = $2
       WHERE referred_id = $1 AND status = 'pending' RETURNING referrer_id`, [buyerId, paymentRowId]);
-  return r.rows[0]?.referrer_id ?? null;
+  const referrerId = r.rows[0]?.referrer_id ?? null;
+  if (referrerId) await addCredits(db, referrerId, referralBonusCredits(), "referral", "Referral bonus: your friend bought credits", { buyerId, paymentRowId });
+  return referrerId;
 }
 
 export function registerReferralRoutes(app: Express) {
@@ -138,16 +113,14 @@ export function registerReferralRoutes(app: Express) {
                 count(*) FILTER (WHERE status = 'redeemed')::int AS used
            FROM referrals WHERE referrer_id = $1`, [userId]);
       const s = stats.rows[0] || {};
-      const usable = await usableCredits(userId);
+      const earned = (s.credits || 0) + (s.used || 0);
       res.json({
         code,
-        invited: s.invited || 0,            // friends who signed up with your code
-        waiting: s.waiting || 0,            // …and haven't paid yet
-        credits: s.credits || 0,            // unused rewards
-        used: s.used || 0,
-        discountPercent: Math.min(usable, MAX_CREDITS_PER_PAYMENT) * DISCOUNT_PER_REFERRAL_PCT, // applied to your next payment
-        perReferralPercent: DISCOUNT_PER_REFERRAL_PCT,
-        maxDiscountPercent: MAX_CREDITS_PER_PAYMENT * DISCOUNT_PER_REFERRAL_PCT,
+        invited: s.invited || 0,                     // friends who signed up with your code
+        waiting: s.waiting || 0,                     // …and haven't bought credits yet
+        rewarded: earned,                            // friends who bought credits → you were paid
+        bonusPerFriend: referralBonusCredits(),      // credits you get per such friend
+        totalBonusCredits: earned * referralBonusCredits(),
       });
     } catch (e: any) {
       console.error("[Referral] me failed:", e?.message || e);
