@@ -25,10 +25,10 @@ import { BullWiserLogo } from "@/components/BullWiserLogo";
 // ★★★ CORRECTED NAVIGATION - Market Outlook + Analytics ★★★
 const navigation = [
   { name: "Dashboard",       href: "/",                    icon: LayoutDashboard },
-  { name: "Portfolio",       href: "/portfolio",           icon: Briefcase },
+  { name: "Watchlist",       href: "/portfolio",           icon: Briefcase },
   { name: "Notifications",   href: "/notifications",       icon: Bell },
   { name: "Predictions",     href: "/predictions",         icon: TrendingUp },
-  { name: "Trading History", href: "/trading-history",     icon: History },
+  { name: "Prediction History", href: "/trading-history",     icon: History },
   { name: "Market Outlook",  href: "/market-outlook",      icon: LineChart },      // ★ RESTORED
   { name: "Analytics",       href: "/prediction-analytics", icon: BarChart3 },      // ★ NEW
   { name: "Plans & Recharge", href: "/plans",               icon: Crown },

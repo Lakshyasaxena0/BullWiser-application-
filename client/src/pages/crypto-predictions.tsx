@@ -315,19 +315,6 @@ export default function CryptoPredictions() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="mode">Prediction Mode</Label>
-                  <Select value={mode} onValueChange={setMode}>
-                    <SelectTrigger data-testid="select-mode">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="suggestion">AI + Astro Suggestion</SelectItem>
-                      <SelectItem value="auto">Auto-Trading Signal</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
                   <Label htmlFor="riskLevel">Risk Level</Label>
                   <Select value={riskLevel} onValueChange={setRiskLevel}>
                     <SelectTrigger data-testid="select-risk">

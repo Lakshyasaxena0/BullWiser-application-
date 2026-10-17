@@ -114,9 +114,6 @@ export default function Predictions() {
           when, 
           mode, 
           riskLevel, 
-          tradesPerDay: 1, 
-          cryptoValue: 10000, 
-          duration: "daily",
           _timestamp: timestamp  // Force fresh calculation
         });
         return await res.json();
@@ -366,17 +363,6 @@ export default function Predictions() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Prediction Mode</Label>
-                  <Select value={mode} onValueChange={(val) => { setMode(val); setPredResult(null); }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="suggestion">AI + Astro Suggestion</SelectItem>
-                      <SelectItem value="auto">Auto-Trading Signal</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
                   <Label>Risk Level</Label>
                   <Select value={riskLevel} onValueChange={(val) => { setRiskLevel(val); setPredResult(null); }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -442,7 +428,7 @@ export default function Predictions() {
                        {!predResult.livePriceAvailable && (
                           <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                             <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-                            <p>Live market data unavailable — prices are model-based estimates. Verify on NSE/BSE before trading.</p>
+                            <p>Live market data unavailable — prices are model-based estimates. Verify on NSE/BSE before acting on it.</p>
                           </div>
                         )}
 

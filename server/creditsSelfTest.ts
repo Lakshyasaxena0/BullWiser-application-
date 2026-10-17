@@ -1,5 +1,5 @@
 // Run: npm run test:credits — pricing rules (pure) and, when a real DATABASE_URL is set, wallet behaviour.
-import { predictionCost, outlookCost, validateLooseCredits, packList, CREDIT_RUPEES, benefitTier } from "./creditPricing";
+import { predictionCost, outlookCost, validateLooseCredits, packList, CREDIT_RUPEES, benefitTier, sectorTier, momentumExtra } from "./creditPricing";
 let fail = 0; const ok = (n: string, c: boolean) => { console.log(`${c ? "PASS" : "FAIL"}  ${n}`); if (!c) fail++; };
 const base = { asset: "stock" as const, style: "suggestion" as const, risk: "low" as const, horizonDays: 1, useAi: true, useAstro: true, potentialMovePct: 0 };
 
@@ -9,8 +9,11 @@ ok("loose buy accepts 37 credits", (validateLooseCredits(37) as any).ok === true
 ok("loose buy rejects 3, 1.5, 'abc', 99999", [3, 1.5, "abc", 99999].every(v => !(validateLooseCredits(v) as any).ok));
 
 const c0 = predictionCost(base).credits;
-ok("cheapest full prediction costs 5 credits (₹50)", c0 === 5);
-ok("auto-trading signal costs more than suggestion", predictionCost({ ...base, style: "auto" }).credits > c0);
+ok("lowest full prediction = AI 3 + astrology 3 + statistics 3 = 9 credits (₹90)", c0 === 9);
+ok("statistics only costs exactly 3", predictionCost({ ...base, useAi: false, useAstro: false }).credits === 3);
+ok("AI alone adds exactly 3", predictionCost({ ...base, useAstro: false }).credits === 6);
+ok("high-return sector costs more than low-return sector", predictionCost({ ...base, sectorTier: 2 }).credits > predictionCost({ ...base, sectorTier: 0 }).credits && sectorTier(["Defence"]) === 2 && sectorTier(["FMCG"]) === 0);
+ok("a stock performing well costs more", predictionCost({ ...base, momentumPct: 30 }).credits > c0 && momentumExtra(30) === 2 && momentumExtra(-5) === 0);
 ok("crypto costs more than stock", predictionCost({ ...base, asset: "crypto" }).credits > c0);
 ok("higher risk costs more (low < medium < high)", predictionCost({ ...base, risk: "medium" }).credits > c0 && predictionCost({ ...base, risk: "high" }).credits > predictionCost({ ...base, risk: "medium" }).credits);
 ok("longer horizon costs more", predictionCost({ ...base, horizonDays: 90 }).credits > predictionCost({ ...base, horizonDays: 7 }).credits);
@@ -18,7 +21,7 @@ ok("switching AI off is cheaper", predictionCost({ ...base, useAi: false }).cred
 ok("switching astrology off is cheaper", predictionCost({ ...base, useAstro: false }).credits < c0);
 ok("both off = statistics only, cheapest", predictionCost({ ...base, useAi: false, useAstro: false }).credits < predictionCost({ ...base, useAi: false }).credits);
 ok("bigger benefit potential costs more", predictionCost({ ...base, potentialMovePct: 20 }).credits > c0 && benefitTier(5) === 1 && benefitTier(1) === 0 && benefitTier(null) === 0);
-ok("never below 1 or above 40", predictionCost({ ...base, useAi: false, useAstro: false }).credits >= 1 && predictionCost({ ...base, style: "auto", asset: "crypto", risk: "high", horizonDays: 400, potentialMovePct: 99 }).credits <= 40);
+ok("never below 1 or above 40", predictionCost({ ...base, useAi: false, useAstro: false }).credits >= 1 && predictionCost({ ...base, asset: "crypto", risk: "high", horizonDays: 400, potentialMovePct: 99 }).credits <= 40);
 ok("breakdown lines are provided", predictionCost(base).lines.length >= 6);
 ok("outlook costs 3 (4 for long horizons)", outlookCost("1m").credits === 3 && outlookCost("1y").credits === 4);
 

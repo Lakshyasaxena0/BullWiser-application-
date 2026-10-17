@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import MobileHeader from "@/components/mobile/MobileHeader";
 import MobileBottomNav from "@/components/mobile/MobileBottomNav";
+import CreditsSummary from "@/components/CreditsSummary";
 import MobilePredictionCard from "@/components/mobile/MobilePredictionCard";
 import { 
   TrendingUp, 
@@ -63,6 +64,7 @@ export default function MobileDashboard() {
       />
 
       <div className="main-content-mobile px-4 py-4">
+        <div className="mb-4"><CreditsSummary /></div>
         {/* Push Notification Settings (shown when menu clicked) */}
         {showNotificationSettings && (
           <Card className="mb-4">

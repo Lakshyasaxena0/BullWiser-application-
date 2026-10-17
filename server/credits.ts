@@ -8,8 +8,9 @@ import type { Express, Response } from "express";
 import { pool } from "./db";
 import { isAuthenticated } from "./auth";
 import { isPaywallOn, isPaymentsConfigured, createCreditOrder } from "./payments";
-import { getBalance, spendCredits, refundSpend, recentTransactions, ensureWalletTables } from "./wallet";
-import { predictionCost, outlookCost, packList, validateLooseCredits, normStyle, normRisk, CREDIT_RUPEES, LOOSE_MIN, LOOSE_MAX, CostResult, Asset } from "./creditPricing";
+import { getTotals, getBalance, spendCredits, refundSpend, recentTransactions, ensureWalletTables } from "./wallet";
+import { predictionCost, outlookCost, packList, validateLooseCredits, normStyle, normRisk, sectorTier, CREDIT_RUPEES, LOOSE_MIN, LOOSE_MAX, CostResult, Asset } from "./creditPricing";
+import { sectorsForSymbol } from "./vedic/analysis";
 import { stockDataService } from "./stockDataService";
 import { cryptoDataService } from "./cryptoDataService";
 
@@ -20,19 +21,23 @@ export async function getUserPrefs(userId: string): Promise<UserPrefs> {
   return { useAi: r.rows[0]?.use_ai !== false, useAstro: r.rows[0]?.use_astrology !== false };
 }
 
-/** Typical ~80% move over the horizon, from the asset's own daily volatility (cached data, no extra cost). */
-export async function estimatePotentialPct(asset: Asset, symbol: string, horizonDays: number): Promise<number | null> {
+/** Asset stats from cached history: typical ~80% move over the horizon, and the recent ~3 month return. */
+export async function assetStats(asset: Asset, symbol: string, horizonDays: number): Promise<{ potential: number | null; momentum: number | null }> {
   try {
     const raw = asset === "stock"
       ? await stockDataService.getHistoricalData(symbol.toUpperCase(), 400)
       : await cryptoDataService.getCryptoHistoricalData(symbol.toUpperCase(), 30);
     const closes = (raw || []).map((d: any) => Number(d.close)).filter((x: number) => x > 0).slice(-260);
-    if (closes.length < 15) return null;
+    if (closes.length < 15) return { potential: null, momentum: null };
     const rets: number[] = []; for (let i = 1; i < closes.length; i++) rets.push(Math.log(closes[i] / closes[i - 1]));
     const m = rets.reduce((s, x) => s + x, 0) / rets.length;
     const sd = Math.sqrt(rets.reduce((s, x) => s + (x - m) ** 2, 0) / (rets.length - 1));
-    return Math.min(100, 1.28 * sd * Math.sqrt(Math.max(1, horizonDays)) * 100);
-  } catch { return null; }
+    const back = Math.min(63, closes.length - 1);
+    return {
+      potential: Math.min(100, 1.28 * sd * Math.sqrt(Math.max(1, horizonDays)) * 100),
+      momentum: (closes[closes.length - 1] / closes[closes.length - 1 - back] - 1) * 100,
+    };
+  } catch { return { potential: null, momentum: null }; }
 }
 
 export const horizonDaysFrom = (when: Date) => Math.max(1, Math.ceil((when.getTime() - Date.now()) / 86400000));
@@ -40,8 +45,9 @@ export const horizonDaysFrom = (when: Date) => Math.max(1, Math.ceil((when.getTi
 export async function quotePrediction(userId: string, asset: Asset, symbol: string, when: Date, style: unknown, risk: unknown): Promise<CostResult> {
   const prefs = await getUserPrefs(userId);
   const days = horizonDaysFrom(when);
-  const potential = await estimatePotentialPct(asset, symbol, days);
-  return predictionCost({ asset, style: normStyle(style), risk: normRisk(risk), horizonDays: days, useAi: prefs.useAi, useAstro: prefs.useAstro, potentialMovePct: potential });
+  const { potential, momentum } = await assetStats(asset, symbol, days);
+  const sectors = sectorsForSymbol(symbol, asset);
+  return predictionCost({ asset, style: normStyle(style), risk: normRisk(risk), horizonDays: days, useAi: prefs.useAi, useAstro: prefs.useAstro, potentialMovePct: potential, momentumPct: momentum, sectors, sectorTier: asset === 'crypto' ? 2 : sectorTier(sectors) });
 }
 
 export interface Charge { free: boolean; amount: number; txId?: number; balance?: number }
@@ -69,9 +75,9 @@ export function registerCreditRoutes(app: Express) {
 
   app.get("/api/credits/me", isAuthenticated, async (req: any, res: Response) => {
     try {
-      const [balance, history] = await Promise.all([getBalance(req.user.id), recentTransactions(req.user.id, 40)]);
+      const [balance, history, totals] = await Promise.all([getBalance(req.user.id), recentTransactions(req.user.id, 40), getTotals(req.user.id)]);
       res.json({
-        balance, history,
+        balance, history, ...totals,
         creditRupees: CREDIT_RUPEES, packs: packList(), looseMin: LOOSE_MIN, looseMax: LOOSE_MAX,
         creditsRequired: isPaywallOn(),                 // false → free mode, nothing is deducted
         paymentsEnabled: isPaymentsConfigured(),

@@ -44,38 +44,6 @@ function parseWhen(when: unknown): Date | null {
  */
 
 
-const VALID_DURATIONS = ['daily', 'weekly', 'monthly', 'yearly'];
-const VALID_TRADE_TYPES = ['low', 'medium', 'high'];
-const VALID_MODES = ['suggestion', 'auto'];
-
-/**
- * Validate and normalise billing inputs. Without this, a negative tradesPerDay produced a
- * negative price (a free subscription), and non-numeric input produced NaN prices that
- * crashed the insert with a 500.
- */
-function parseBillingInput(body: any, kind: 'stock' | 'crypto'): { error: string } | { value: any } {
-  const mode = body.mode ?? 'suggestion';
-  const duration = body.duration ?? 'daily';
-  const tradesPerDay = parseInt(body.tradesPerDay ?? 2);
-  const referralCount = Math.max(0, parseInt(body.referralCount ?? 0) || 0);
-
-  if (!VALID_MODES.includes(mode)) return { error: `Invalid mode. Use one of: ${VALID_MODES.join(', ')}` };
-  if (!VALID_DURATIONS.includes(duration)) return { error: `Invalid duration. Use one of: ${VALID_DURATIONS.join(', ')}` };
-  if (!Number.isInteger(tradesPerDay) || tradesPerDay < 1 || tradesPerDay > 100) {
-    return { error: 'tradesPerDay must be a whole number between 1 and 100' };
-  }
-
-  if (kind === 'stock') {
-    const tradeType = body.tradeType ?? 'low';
-    if (!VALID_TRADE_TYPES.includes(tradeType)) return { error: `Invalid tradeType. Use one of: ${VALID_TRADE_TYPES.join(', ')}` };
-    return { value: { mode, tradeType, tradesPerDay, duration, referralCount } };
-  }
-
-  const cryptoValue = parseFloat(body.cryptoValue ?? 10000);
-  if (!isFinite(cryptoValue) || cryptoValue <= 0) return { error: 'cryptoValue must be a positive number' };
-  return { value: { mode, tradesPerDay, cryptoValue, duration, referralCount } };
-}
-
 /** Planetary snapshot stored with each prediction (shared by every prediction route). */
 async function buildPlanetaryData(whenDate: Date): Promise<any | null> {
   try {
@@ -104,41 +72,6 @@ async function buildPlanetaryData(whenDate: Date): Promise<any | null> {
     console.log('[Predict] Could not fetch planetary data:', astroError);
     return null;
   }
-}
-
-function calculateBullwiserPrice(mode: string, tradeType: string, tradesPerDay: number, duration: string, referralCount: number = 0) {
-  const tradeTypeRates = { 'low': 700, 'medium': 1400, 'high': 2100 };
-  const ratePerTrade = tradeTypeRates[tradeType as keyof typeof tradeTypeRates] || 700;
-  const basePrice = ratePerTrade * tradesPerDay;
-  const durationDiscounts = { 'daily': 0.00, 'weekly': 0.05, 'monthly': 0.10, 'yearly': 0.20 };
-  const durationDiscount = durationDiscounts[duration as keyof typeof durationDiscounts] || 0.0;
-  const discountedPrice = basePrice * (1 - durationDiscount);
-  const referralDiscount = Math.min(referralCount * 0.10, 0.50);
-  const referralDiscountedPrice = discountedPrice * (1 - referralDiscount);
-  let autoModeSurcharge = 0;
-  if (mode === 'auto') {
-    const multipliers = { 'low': 1, 'medium': 2, 'high': 3 };
-    autoModeSurcharge = 150 * (multipliers[tradeType as keyof typeof multipliers] || 1);
-  }
-  const finalPrice = Math.round(referralDiscountedPrice + autoModeSurcharge);
-  return { mode, tradeType, tradesPerDay, duration, basePrice, afterDurationDiscount: Math.round(discountedPrice), afterReferralDiscount: Math.round(referralDiscountedPrice), autoModeSurcharge, referralDiscountApplied: Math.round(referralDiscount * 100), durationDiscountApplied: Math.round(durationDiscount * 100), finalBill: finalPrice };
-}
-
-function calculateCryptoBillingPrice(mode: string, tradesPerDay: number, cryptoValue: number, duration: string, referralCount: number = 0) {
-  const basePrice = 500;
-  const valueMultiplier = Math.max(1, Math.floor(cryptoValue / 1000));
-  const tradePrice = tradesPerDay * 50;
-  const modeMultiplier = mode === 'auto' ? 1.5 : 1.0;
-  const subtotal = (basePrice + tradePrice) * valueMultiplier * modeMultiplier;
-  const durationDiscounts = { 'daily': 0.00, 'weekly': 0.05, 'monthly': 0.10, 'yearly': 0.20 };
-  const durationDiscount = durationDiscounts[duration as keyof typeof durationDiscounts] || 0.0;
-  const discountedPrice = subtotal * (1 - durationDiscount);
-  const referralDiscount = Math.min(referralCount * 0.10, 0.50);
-  const referralDiscountedPrice = discountedPrice * (1 - referralDiscount);
-  let autoModeSurcharge = 0;
-  if (mode === 'auto') autoModeSurcharge = Math.min(cryptoValue * 0.01, 1000);
-  const finalPrice = Math.round(referralDiscountedPrice + autoModeSurcharge);
-  return { mode, tradesPerDay, cryptoValue, duration, basePrice, tradePrice, valueMultiplier, modeMultiplier, subtotal: Math.round(subtotal), afterDurationDiscount: Math.round(discountedPrice), afterReferralDiscount: Math.round(referralDiscountedPrice), autoModeSurcharge: Math.round(autoModeSurcharge), referralDiscountApplied: Math.round(referralDiscount * 100), durationDiscountApplied: Math.round(durationDiscount * 100), finalBill: finalPrice };
 }
 
 // ★ Helper: Calculate time-scaled risk multiplier
@@ -298,30 +231,6 @@ export function registerRoutes(app: Express): Server {
       res.json({ ...userWithoutPassword, role: req.user.role || 'user' });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch user" });
-    }
-  });
-
-  app.post('/api/billing/estimate', async (req: any, res) => {
-    try {
-      const parsed = parseBillingInput(req.body, 'stock');
-      if ('error' in parsed) return res.status(400).json({ message: parsed.error });
-      const { mode, tradeType, tradesPerDay, duration } = parsed.value;
-      const referralCount = 0;
-      res.json(calculateBullwiserPrice(mode, tradeType, tradesPerDay, duration, referralCount));
-    } catch (error) {
-      res.status(500).json({ message: "Error calculating price" });
-    }
-  });
-
-  app.post('/api/billing/crypto/estimate', async (req: any, res) => {
-    try {
-      const parsed = parseBillingInput(req.body, 'crypto');
-      if ('error' in parsed) return res.status(400).json({ message: parsed.error });
-      const { mode, tradesPerDay, cryptoValue, duration } = parsed.value;
-      const referralCount = 0;
-      res.json(calculateCryptoBillingPrice(mode, tradesPerDay, cryptoValue, duration, referralCount));
-    } catch (error) {
-      res.status(500).json({ message: "Error calculating crypto billing price" });
     }
   });
 
@@ -606,46 +515,6 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Subscriptions are created ONLY after a verified Razorpay payment (server/payments.ts).
-  // Set ALLOW_FREE_SUBSCRIPTIONS=true for local development only.
-  const freeSubsAllowed = () => process.env.ALLOW_FREE_SUBSCRIPTIONS === 'true' && process.env.NODE_ENV !== 'production';
-
-  app.post('/api/subscribe', isAuthenticated, async (req: any, res) => {
-    if (!freeSubsAllowed()) return res.status(402).json({ message: 'Payment required. Use /api/payments/create-order.' });
-    try {
-      const userId = req.user.id;
-      const parsed = parseBillingInput({ duration: 'monthly', ...req.body }, 'stock');
-      if ('error' in parsed) return res.status(400).json({ message: parsed.error });
-      const { mode, tradeType, tradesPerDay, duration, referralCount } = parsed.value;
-      const bill = calculateBullwiserPrice(mode, tradeType, tradesPerDay, duration, referralCount);
-      const startTs = Math.floor(Date.now() / 1000);
-      const durationMap: any = { daily: 86400, weekly: 7 * 86400, monthly: 30 * 86400, yearly: 365 * 86400 };
-      const endTs = startTs + durationMap[duration];
-      const subscription = await storage.createSubscription({ userId, mode, tradeType, tradesPerDay, duration, startTs, endTs, price: bill.finalBill });
-      res.json({ status: 'ok', invoice: bill, subscriptionId: subscription.id });
-    } catch (error) {
-      res.status(500).json({ message: "Error creating subscription" });
-    }
-  });
-
-  app.post('/api/crypto/subscribe', isAuthenticated, async (req: any, res) => {
-    if (!freeSubsAllowed()) return res.status(402).json({ message: 'Payment required. Use /api/payments/create-order.' });
-    try {
-      const userId = req.user.id;
-      const parsed = parseBillingInput({ duration: 'monthly', ...req.body }, 'crypto');
-      if ('error' in parsed) return res.status(400).json({ message: parsed.error });
-      const { mode, tradesPerDay, cryptoValue, duration, referralCount } = parsed.value;
-      const bill = calculateCryptoBillingPrice(mode, tradesPerDay, cryptoValue, duration, referralCount);
-      const startTs = Math.floor(Date.now() / 1000);
-      const durationMap: any = { daily: 86400, weekly: 7 * 86400, monthly: 30 * 86400, yearly: 365 * 86400 };
-      const endTs = startTs + durationMap[duration];
-      const subscription = await storage.createSubscription({ userId, mode: `crypto-${mode}`, tradeType: 'crypto', tradesPerDay, duration, startTs, endTs, price: bill.finalBill });
-      res.json({ status: 'ok', invoice: bill, subscriptionId: subscription.id, type: 'crypto' });
-    } catch (error) {
-      res.status(500).json({ message: "Error creating crypto subscription" });
-    }
-  });
-
   app.post('/api/feedback', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
@@ -770,20 +639,6 @@ export function registerRoutes(app: Express): Server {
       res.json({ status: 'ok' });
     } catch (error) {
       res.status(500).json({ message: "Error removing from watchlist" });
-    }
-  });
-
-  // Invoices contain another user's id and price, so they must be owner-only
-  // (the old route was public and IDs are sequential, so anyone could enumerate them).
-  app.get('/api/invoice/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) return res.status(400).json({ error: 'invalid id' });
-      const subscription = await storage.getSubscription(id);
-      if (!subscription || subscription.userId !== req.user.id) return res.status(404).json({ error: 'not found' });
-      res.json({ userId: subscription.userId, mode: subscription.mode, tradeType: subscription.tradeType, tradesPerDay: subscription.tradesPerDay, duration: subscription.duration, start: new Date(subscription.startTs * 1000).toISOString(), end: new Date(subscription.endTs * 1000).toISOString(), price: subscription.price });
-    } catch (error) {
-      res.status(500).json({ message: "Error fetching invoice" });
     }
   });
 

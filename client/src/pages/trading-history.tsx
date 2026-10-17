@@ -176,7 +176,7 @@ export default function TradingHistoryPage() {
           <ChevronLeft className="h-4 w-4 mr-1" />Back to Dashboard
         </Button>
         <div className="border-l pl-4">
-          <h1 className="text-2xl font-bold text-gray-900">Trading History</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Prediction History</h1>
           <p className="text-gray-600">Track your stock and crypto prediction history</p>
         </div>
       </div>

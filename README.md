@@ -35,7 +35,7 @@ GitHub → Actions → **Build Windows installer** → Run workflow → download
 Local: `cd desktop && npm install && npm run dist`. Electron 22 is the last version that runs on Windows 7/8.
 
 ## Credits (pay-per-prediction)
-BullWiser runs on credits: **1 credit = ₹10**. Packs: 300 / 500 / 700 / 1200 / 1500 / 2000 credits, or a loose buy of 10–10,000 credits. Balance and history are on **Plans & Recharge**; when credits run out the user must recharge.
+BullWiser runs on credits: **1 credit = ₹10**. Packs: 300 / 500 / 700 / 1200 / 1500 / 2000 credits, or a loose buy of 10–10,000 credits. **Prediction cost:** Statistics 3 + Astrology 3 + AI 3 (only for engines switched on) + extras for risk (0/1/2), how far ahead (0–4), sector return level (0–2, e.g. Defence/Infra/Crypto highest), recent performance (a stock up ≥10% / ≥25% in ~3 months costs +1 / +2) and benefit potential (0–2). The exact breakdown is shown before you press Predict. There is no Auto Mode, daily trade limit or subscription duration; BullWiser never buys or sells anything. Balance, total bought and history are on **Plans & Recharge**; when credits run out the user must recharge.
 
 A prediction costs `ceil((base + engines) × risk × horizon) + benefit tier` credits (min 1, max 40), shown **before** the user presses Predict (`POST /api/credits/quote`):
 base — stock suggestion 1, auto-trading 2, crypto 1.5 / 2.5 · engines — statistics +1, astrology +1.5, AI +1.5 (only if switched on in Settings) · risk — low ×1.0, medium ×1.2, high ×1.4 · horizon — ≤1d ×1.0 … >90d ×1.75 · benefit tier — +0 / +1 / +2 for small / medium / large possible move. Market Outlook costs 3–4 credits. Failed predictions are refunded automatically (once). A friend's first purchase gives the inviter bonus credits.

@@ -41,9 +41,8 @@ export default function Header() {
       "/": "Dashboard", "/predictions": "Predictions", "/portfolio": "Portfolio",
       "/subscription": "Plans & Recharge", "/notifications": "Notifications",
       "/plans": "Plans & Recharge", "/settings": "Settings", "/activities": "Activities",
-      "/trading-history": "Trading History", "/cryptocurrencies": "Cryptocurrencies",
+      "/trading-history": "Prediction History", "/cryptocurrencies": "Cryptocurrencies",
       "/crypto-plans": "Crypto Plans", "/crypto-predictions": "Crypto Predictions",
-      "/crypto-trading": "Crypto Trading",
     };
     return pages[path] || "Dashboard";
   };

@@ -57,6 +57,16 @@ export async function getBalance(userId: string): Promise<number> {
   return Number(r.rows[0]?.balance) || 0;
 }
 
+/** Lifetime totals shown on the front page. */
+export async function getTotals(userId: string): Promise<{ totalPurchased: number; totalSpent: number }> {
+  await ensureWalletTables();
+  const r = await pool.query(
+    `SELECT COALESCE(SUM(delta) FILTER (WHERE kind = 'purchase'), 0) AS bought,
+            COALESCE(-SUM(delta) FILTER (WHERE kind IN ('spend','refund')), 0) AS spent
+       FROM credit_transactions WHERE user_id = $1`, [userId]);
+  return { totalPurchased: Number(r.rows[0]?.bought) || 0, totalSpent: Math.max(0, Number(r.rows[0]?.spent) || 0) };
+}
+
 /** Add credits (purchase / refund / bonus). Pass a transaction client to make it part of a bigger transaction. */
 export async function addCredits(db: Q, userId: string, amount: number, kind: string, description: string, meta?: any): Promise<number> {
   if (!Number.isInteger(amount) || amount <= 0) throw new Error("Invalid credit amount");

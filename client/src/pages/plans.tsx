@@ -97,7 +97,7 @@ export default function PlansPage() {
                 data-testid={`button-pack-${p.credits}`}>
                 <p className="text-2xl font-bold flex items-center gap-1"><Coins className="h-5 w-5 text-amber-500" />{p.credits}</p>
                 <p className="text-gray-600">{rupees(p.rupees)}</p>
-                <p className="text-xs text-primary mt-2">{buying === p.credits ? "Opening payment…" : canPay ? "Buy now" : "Payments coming soon"}</p>
+                <p className="text-xs text-primary mt-2">{buying === p.credits ? "Opening payment…" : canPay ? "Recharge" : "Payments coming soon"}</p>
               </button>
             ))}
           </div>

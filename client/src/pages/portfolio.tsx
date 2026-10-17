@@ -78,7 +78,7 @@ export default function Portfolio() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Portfolio</h1>
-        <p className="text-gray-600">Manage your watchlist and track your investment portfolio</p>
+        <p className="text-gray-600">Your watchlist & predictions tracker (BullWiser does not buy or sell anything)</p>
       </div>
 
       <Tabs defaultValue="watchlist" className="w-full">

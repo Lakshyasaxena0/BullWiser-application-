@@ -45,8 +45,8 @@ export default function ActivityFeed() {
         id: `sub-${s.id}`,
         icon: CheckCircle,
         iconColor: 'bg-green-500',
-        title: `Subscription activated — ${s.mode} plan`,
-        description: `${s.tradeType} risk · ${s.tradesPerDay} trades/day · ₹${s.price}`,
+        title: `Plan purchase recorded`,
+        description: `₹${s.price}`,
         sortTime: s.createdAt ? new Date(s.createdAt).getTime() : 0,
         time: s.createdAt ? formatDistanceToNow(new Date(s.createdAt), { addSuffix: true }) : 'recently',
       });

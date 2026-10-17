@@ -28,8 +28,8 @@ export default function Header() {
       "/": "Dashboard", "/predictions": "Predictions", "/portfolio": "Portfolio",
       "/subscription": "Plans & Recharge", "/notifications": "Notifications",
       "/plans": "Plans & Recharge", "/settings": "Settings", "/activities": "Activities",
-      "/trading-history": "Trading History", "/cryptocurrencies": "Cryptocurrencies",
-      "/crypto-plans": "Crypto Plans", "/crypto-trading": "Crypto Trading",
+      "/trading-history": "Prediction History", "/cryptocurrencies": "Cryptocurrencies",
+      "/crypto-plans": "Crypto Plans",
     };
     return pages[path] || "Dashboard";
   };
