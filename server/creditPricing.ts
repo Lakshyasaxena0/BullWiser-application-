@@ -27,8 +27,8 @@ export interface CostInput {
 export interface CostLine { label: string; value: string }
 export interface CostResult { credits: number; rupees: number; lines: CostLine[] }
 
-// Fixed service costs (credits): each engine that runs costs 3.
-const ENGINE = { statistics: 3, astrology: 3, ai: 3 };
+// Fixed service costs (credits): each engine that runs costs 4.
+const ENGINE = { statistics: 4, astrology: 4, ai: 4 };
 const BUMP = 1;                                                               // each extra factor is worth +1 credit more
 const ASSET_EXTRA: Record<Asset, number> = { stock: 0, crypto: 1 + BUMP };          // crypto needs more live-data work
 const RISK_EXTRA: Record<Risk, number> = { low: 0, medium: 1, high: 2 };
