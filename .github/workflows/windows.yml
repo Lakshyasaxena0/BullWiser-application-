@@ -1,0 +1,24 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install
+        working-directory: desktop
+        run: |
+          copy ..\app-config.json app-config.json
+          npm install --no-audit --no-fund
+      - name: Build NSIS installers (ia32 + x64, Windows 7/8/10/11)
+        working-directory: desktop
+        run: npx electron-builder --win --ia32 --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BullWiser-windows-installers
+          path: desktop/dist/*.exe
