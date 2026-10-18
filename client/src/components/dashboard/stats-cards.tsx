@@ -1,5 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { Wallet, TrendingUp, Target, Gauge } from "lucide-react";
+import { ListChecks, TrendingUp, Target, Hourglass } from "lucide-react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,12 +17,6 @@ export default function StatsCards({ activePredictions, subscriptions }: StatsCa
     staleTime: 60000,
   });
 
-  const usagePercentage = Math.round((activePredictions / 200) * 100);
-
-  const formatCurrency = (val: number) => {
-    if (!val) return '₹0';
-    return `₹${val.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
-  };
 
   if (isLoading) {
     return (
@@ -36,28 +30,23 @@ export default function StatsCards({ activePredictions, subscriptions }: StatsCa
     );
   }
 
-  const portfolioValue = stats?.portfolioValue ?? 0;
-  const portfolioPerformance = stats?.portfolioPerformance ?? 0;
-  const accuracyRate = stats?.accuracyRate ?? 0;
   const totalPredictions = stats?.totalPredictions ?? 0;
+  const scored = stats?.scored ?? 0;
+  const accuracyRate: number | null = stats?.accuracyRate ?? null;
+  const pending = stats?.pending ?? 0;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {/* Total Portfolio Value — NO Nifty score */}
       <Card className="hover:shadow-lg transition-shadow">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Portfolio Value</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {portfolioValue > 0 ? formatCurrency(portfolioValue) : '₹0'}
-              </p>
-              <p className="text-sm text-gray-400 mt-1">
-                {totalPredictions === 0 ? 'No predictions yet' : `${totalPredictions} predictions made`}
-              </p>
+              <p className="text-sm font-medium text-gray-600">Predictions Made</p>
+              <p className="text-2xl font-bold text-gray-900">{totalPredictions}</p>
+              <p className="text-sm text-gray-400 mt-1">{totalPredictions === 0 ? 'No predictions yet' : `${scored} checked against the real price`}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <Wallet className="h-6 w-6 text-green-600" />
+              <ListChecks className="h-6 w-6 text-green-600" />
             </div>
           </div>
         </CardContent>
@@ -81,19 +70,15 @@ export default function StatsCards({ activePredictions, subscriptions }: StatsCa
         </CardContent>
       </Card>
 
-      {/* Accuracy Rate — real data only */}
+      {/* Accuracy Rate — only from predictions already checked against the real price */}
       <Card className="hover:shadow-lg transition-shadow">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Accuracy Rate</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {accuracyRate > 0 ? `${accuracyRate}%` : '—'}
-              </p>
-              <p className={`text-sm font-medium ${portfolioPerformance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {accuracyRate > 0
-                  ? (portfolioPerformance !== 0 ? `Upside: ${portfolioPerformance > 0 ? '+' : ''}${portfolioPerformance.toFixed(2)}%` : 'Based on your feedback')
-                  : 'Make predictions to track'}
+              <p className="text-2xl font-bold text-gray-900">{accuracyRate !== null ? `${accuracyRate}%` : '—'}</p>
+              <p className="text-sm text-purple-600 font-medium">
+                {accuracyRate !== null ? `${stats.correct} right · ${stats.wrong} wrong` : 'Shown after your first prediction is checked'}
               </p>
             </div>
             <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -103,17 +88,16 @@ export default function StatsCards({ activePredictions, subscriptions }: StatsCa
         </CardContent>
       </Card>
 
-      {/* Subscription Usage */}
       <Card className="hover:shadow-lg transition-shadow">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Subscription Usage</p>
-              <p className="text-2xl font-bold text-gray-900">{usagePercentage}%</p>
-              <p className="text-sm text-orange-600 font-medium">{activePredictions} of 200 predictions</p>
+              <p className="text-sm font-medium text-gray-600">Waiting for Result</p>
+              <p className="text-2xl font-bold text-gray-900">{pending}</p>
+              <p className="text-sm text-orange-600 font-medium">Checked automatically after the target date</p>
             </div>
             <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-              <Gauge className="h-6 w-6 text-orange-600" />
+              <Hourglass className="h-6 w-6 text-orange-600" />
             </div>
           </div>
         </CardContent>

@@ -9,7 +9,7 @@ import { statisticalAnalysisService } from "./statisticalAnalysisService";
 import { registerPaymentRoutes, isPaywallOn } from "./payments";
 import { registerReferralRoutes } from "./referrals";
 import { predictionMonitoringService } from "./predictionMonitoringService";
-import { registerPerformanceRoutes } from "./performance";
+import { registerPerformanceRoutes, summarizePerformance } from "./performance";
 import { registerCreditRoutes, chargeOrReject, refundCharge, quotePrediction, getUserPrefs } from "./credits";
 import { registerUserSettingsRoutes } from "./userSettings";
 import { enterRequestOptions } from "./requestOptions";
@@ -325,24 +325,9 @@ export function registerRoutes(app: Express): Server {
             reasoning: 'Vedic astrology analysis', 
             metadata: { aiEnabled: false, feedbackLearningApplied: false } 
           };
-        } catch {
-          enhancedPrediction = { 
-            prediction: { 
-              direction: 'neutral', 
-              confidence: 50, 
-              priceTarget: { 
-                low: Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, 
-                high: Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100 
-              } 
-            }, 
-            combinedConfidence: 50, 
-            finalDirection: 'neutral', 
-            astroRecommendation: 'Hold and observe', 
-            warnings: [], 
-            analysis: { technicalFactors: [], marketSentiment: 'mixed', keyRisks: [], recommendation: 'Hold and observe' }, 
-            reasoning: 'Conservative estimate', 
-            metadata: { aiEnabled: false, feedbackLearningApplied: false } 
-          };
+        } catch (e) {
+          // No engine could produce a real analysis → never invent a 'neutral 50%' result; the outer handler refunds the credits
+          throw new Error('All prediction engines failed');
         }
       } else {
         // ★ If AI gave prediction, also scale it by time horizon
@@ -621,13 +606,10 @@ export function registerRoutes(app: Express): Server {
 
   app.get('/api/user/dashboard-stats', isAuthenticated, async (req: any, res) => {
     try {
-      const [allPredictions, allFeedback] = await Promise.all([storage.getUserPredictions(req.user.id), storage.getUserFeedback(req.user.id)]);
-      const activePredictions = allPredictions.filter(p => p.isActive);
-      const portfolioValue = activePredictions.reduce((sum, p) => sum + (p.currentPrice || 0), 0);
-      let accuracyRate = 0;
-      if (allFeedback.length > 0) accuracyRate = Math.round((allFeedback.filter(f => f.useful === 1).length / allFeedback.length) * 100 * 10) / 10;
-      else if (allPredictions.length > 0) accuracyRate = Math.round((allPredictions.reduce((sum, p) => sum + (p.confidence || 0), 0) / allPredictions.length) * 10) / 10;
-      res.json({ portfolioValue: Math.round(portfolioValue * 100) / 100, accuracyRate, totalPredictions: allPredictions.length, activePredictionsCount: activePredictions.length });
+      const mine = await pool.query(`SELECT stock, ai_learning AS "aiLearning", actual_price AS "actualPrice", is_active AS "isActive", pred_low AS "predLow", pred_high AS "predHigh", confidence FROM predictions WHERE user_id = $1`, [req.user.id]);
+      const perf = summarizePerformance(mine.rows);
+      // Only real, checked results: accuracy stays empty until a prediction has been compared with the real price
+      res.json({ totalPredictions: mine.rows.length, scored: perf.scored, correct: perf.correct, wrong: perf.wrong, accuracyRate: perf.accuracyPct, pending: perf.pending });
     } catch (error) {
       res.status(500).json({ message: "Error fetching dashboard statistics" });
     }
@@ -1003,15 +985,15 @@ export function registerRoutes(app: Express): Server {
   });
 
   app.post('/api/notifications/subscribe', isAuthenticated, async (req: any, res) => {
-    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results are sent by email — manage them in Settings → Notifications.' });
+    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results appear in your Notifications page and by email — manage them in Settings → Notifications.' });
   });
 
   app.post('/api/notifications/unsubscribe', isAuthenticated, async (req: any, res) => {
-    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results are sent by email — manage them in Settings → Notifications.' });
+    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results appear in your Notifications page and by email — manage them in Settings → Notifications.' });
   });
 
   app.post('/api/notifications/test', isAuthenticated, async (req: any, res) => {
-    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results are sent by email — manage them in Settings → Notifications.' });
+    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results appear in your Notifications page and by email — manage them in Settings → Notifications.' });
   });
 
   const httpServer = createServer(app);

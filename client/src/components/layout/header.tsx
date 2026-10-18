@@ -18,7 +18,7 @@ export default function Header() {
   // Fetch real notifications to show correct badge count
   const { data: notifications } = useQuery<any[]>({
     queryKey: ["/api/notifications"],
-    staleTime: 30000,
+    staleTime: 0, refetchInterval: 60000,
   });
 
   const unreadCount = notifications?.filter((n: any) => !n.read)?.length ?? 0;

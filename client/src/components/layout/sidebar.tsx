@@ -164,7 +164,7 @@ export default function Sidebar() {
                       <Link href={item.href}>
                         <a
                           className={`flex items-center p-3 rounded-lg transition-colors duration-200 ${
-                            isActive ? "bg-primary text-white" : "text-gray-700 hover:bg-gray-100"
+                            isActive ? "bg-primary/15 text-primary font-semibold ring-1 ring-primary/30" : "text-gray-700 hover:bg-gray-100"
                           } ${isCollapsed ? "justify-center" : "space-x-3"}`}
                           onClick={() => setIsMobileOpen(false)}
                           data-testid={`nav-${item.name.toLowerCase().replace(/ /g, "-")}`}

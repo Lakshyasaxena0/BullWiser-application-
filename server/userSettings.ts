@@ -29,10 +29,34 @@ export async function getUserSettings(userId: string): Promise<UserSettings & { 
   return out;
 }
 
+// ── In-app notifications (the bell + Notifications page) ──
+let notifReady: Promise<void> | null = null;
+function ensureNotificationsTable() {
+  notifReady ??= pool.query(`CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY, user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type VARCHAR(30) NOT NULL DEFAULT 'info', title TEXT NOT NULL, message TEXT NOT NULL,
+      symbol VARCHAR(40), read BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+    CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);`).then(() => undefined);
+  return notifReady;
+}
+export async function addNotification(userId: string, n: { type: string; title: string; message: string; symbol?: string }) {
+  try {
+    await ensureNotificationsTable();
+    await pool.query("INSERT INTO notifications (user_id, type, title, message, symbol) VALUES ($1,$2,$3,$4,$5)", [userId, n.type, n.title, n.message, n.symbol ?? null]);
+  } catch (e: any) { console.error("[Notify] could not store notification:", e?.message || e); }
+}
+
 /** Email the owner when one of their predictions has been checked against the real price (only if they left the switches on). */
 export async function notifyPredictionResult(userId: string, info: { symbol: string; predicted: string; actual: string; changePct: number; correct: boolean }) {
   try {
     const st = await getUserSettings(userId);
+    if (st.predictionAlerts) {
+      await addNotification(userId, {
+        type: info.correct ? "success" : "warning", symbol: info.symbol,
+        title: `${info.symbol}: prediction ${info.correct ? "was right" : "was wrong"}`,
+        message: `We called ${info.predicted}; the real price moved ${info.changePct > 0 ? "+" : ""}${info.changePct}% (${info.actual}).`,
+      });
+    }
     if (!st.email || !st.emailNotifications || !st.predictionAlerts) return;
     const verdict = info.correct ? "was right ✅" : "was wrong ❌";
     const text = `Your BullWiser prediction for ${info.symbol} has reached its target date.\n\nWe called it ${info.predicted}; the real price moved ${info.changePct > 0 ? "+" : ""}${info.changePct}% (${info.actual}). The call ${verdict}.\n\nSee all results under Prediction Analytics. BullWiser gives analysis only — it does not buy or sell anything, and you are responsible for your own profit or loss.\n\nYou can turn these emails off in Settings → Notifications.`;
@@ -76,6 +100,26 @@ export function registerUserSettingsRoutes(app: Express) {
       await pool.query("UPDATE users SET settings = COALESCE(settings, '{}'::jsonb) || $2::jsonb, updated_at = now() WHERE id = $1", [req.user.id, JSON.stringify(patch)]);
       res.json(await getUserSettings(req.user.id));
     } catch { res.status(500).json({ message: "Could not save settings" }); }
+  });
+
+  app.get("/api/notifications", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      await ensureNotificationsTable();
+      const r = await pool.query(`SELECT id, type, title, message, symbol, read, created_at AS "createdAt" FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`, [req.user.id]);
+      res.json(r.rows);
+    } catch { res.status(500).json({ message: "Could not load notifications" }); }
+  });
+  app.post("/api/notifications/read-all", isAuthenticated, async (req: any, res: Response) => {
+    try { await ensureNotificationsTable(); await pool.query("UPDATE notifications SET read = true WHERE user_id = $1", [req.user.id]); res.json({ status: "ok" }); }
+    catch { res.status(500).json({ message: "Could not update notifications" }); }
+  });
+  app.post("/api/notifications/:id/read", isAuthenticated, async (req: any, res: Response) => {
+    try { await ensureNotificationsTable(); await pool.query("UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2", [parseInt(req.params.id, 10), req.user.id]); res.json({ status: "ok" }); }
+    catch { res.status(500).json({ message: "Could not update notification" }); }
+  });
+  app.delete("/api/notifications/:id", isAuthenticated, async (req: any, res: Response) => {
+    try { await ensureNotificationsTable(); await pool.query("DELETE FROM notifications WHERE id = $1 AND user_id = $2", [parseInt(req.params.id, 10), req.user.id]); res.json({ status: "ok" }); }
+    catch { res.status(500).json({ message: "Could not delete notification" }); }
   });
 
   app.get("/api/predictions/feedback", isAuthenticated, async (req: any, res: Response) => {
