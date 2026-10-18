@@ -1,3 +1,4 @@
+import VerifyEmailBanner from "@/components/VerifyEmailBanner";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -64,7 +65,7 @@ export default function MobileDashboard() {
       />
 
       <div className="main-content-mobile px-4 py-4">
-        <div className="mb-4"><CreditsSummary /></div>
+        <div className="mb-4 space-y-3"><VerifyEmailBanner /><CreditsSummary /></div>
         {/* Push Notification Settings (shown when menu clicked) */}
         {showNotificationSettings && (
           <Card className="mb-4">

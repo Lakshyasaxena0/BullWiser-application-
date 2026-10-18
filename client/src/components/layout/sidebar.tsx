@@ -187,7 +187,7 @@ export default function Sidebar() {
               className={`flex items-center p-3 w-full rounded-lg text-gray-700 hover:bg-gray-100 ${
                 isCollapsed ? "justify-center" : "space-x-3 justify-start"
               }`}
-              onClick={() => (window.location.href = "/api/logout")}
+              onClick={async () => { try { await fetch("/api/logout", { method: "POST", credentials: "include" }); } catch {} window.location.href = "/"; }}
               data-testid="button-logout"
               title={isCollapsed ? "Sign Out" : undefined}
             >

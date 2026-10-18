@@ -15,6 +15,8 @@ import Plans from "@/pages/plans";
 import AuthPage from "@/pages/auth-page";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
+import VerifyEmailPage from "@/pages/verify-email";
+import VerifyEmailBanner from "@/components/VerifyEmailBanner";
 import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 import Sidebar from "@/components/layout/sidebar";
@@ -44,11 +46,12 @@ function Router() {
   }, []);
 
   // Password-reset pages work whether or not someone is logged in (the link comes from an email)
-  if (location === "/forgot-password" || location === "/reset-password") {
+  if (location === "/forgot-password" || location === "/reset-password" || location === "/verify-email") {
     return (
       <Switch>
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route path="/reset-password" component={ResetPasswordPage} />
+        <Route path="/verify-email" component={VerifyEmailPage} />
       </Switch>
     );
   }
@@ -104,6 +107,7 @@ function Router() {
       <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-64" id="main-content">
         <Header />
         <main className="p-6 space-y-6 overflow-y-auto h-full bg-gray-50">
+          <VerifyEmailBanner />
           <Switch>
             <Route path="/" component={Dashboard} />
             <Route path="/dashboard" component={Dashboard} />

@@ -12,6 +12,7 @@ import { predictionMonitoringService } from "./predictionMonitoringService";
 import { registerPerformanceRoutes, summarizePerformance } from "./performance";
 import { registerCreditRoutes, chargeOrReject, refundCharge, quotePrediction, getUserPrefs } from "./credits";
 import { registerUserSettingsRoutes } from "./userSettings";
+import { registerEmailVerificationRoutes } from "./emailVerification";
 import { enterRequestOptions } from "./requestOptions";
 import { outlookCost } from "./creditPricing";
 import { insertSubscriptionSchema, insertFeedbackSchema, insertPredictionSchema, insertWatchlistSchema } from "@shared/schema";
@@ -34,10 +35,16 @@ import { isGroqConfigured } from "./groqClient";
 // ── Request-validation helpers ───────────────────────────────────────────────
 
 /** Parse the optional `when` field. Returns a valid Date, or null if it can't be parsed. */
+const MAX_AHEAD_DAYS = 365 * 3;
 function parseWhen(when: unknown): Date | null {
   if (!when || when === 'now') return new Date();
   const d = new Date(when as string);
-  return isNaN(d.getTime()) ? null : d;
+  if (isNaN(d.getTime())) return null;
+  // a prediction is about the future: nothing before today (India time — a date picker's "today" is midnight) and not absurdly far ahead
+  const IST = 5.5 * 3600000, DAY = 86400000;
+  const startOfTodayIST = Math.floor((Date.now() + IST) / DAY) * DAY - IST;
+  if (d.getTime() < startOfTodayIST || d.getTime() > Date.now() + MAX_AHEAD_DAYS * 86400000) return null;
+  return d;
 }
 
 /**
@@ -218,6 +225,7 @@ export function registerRoutes(app: Express): Server {
   registerCreditRoutes(app);
   registerPerformanceRoutes(app);
   registerUserSettingsRoutes(app);
+  registerEmailVerificationRoutes(app);
 
   app.get('/api/warmup', async (req, res) => {
     try {
@@ -273,7 +281,7 @@ export function registerRoutes(app: Express): Server {
       const prefs = await getUserPrefs(userId);
       enterRequestOptions(prefs);
       const whenDate = parseWhen(when);
-      if (!whenDate) return res.status(400).json({ message: "Invalid date in 'when'" });
+      if (!whenDate) return res.status(400).json({ message: "Please choose a date from today up to 3 years ahead" });
       const upperSymbol = String(stock).toUpperCase();
       
       console.log(`[Predict] Generating prediction for ${upperSymbol} with target date: ${whenDate.toISOString()}`);
@@ -377,7 +385,7 @@ export function registerRoutes(app: Express): Server {
       if (!cryptoQuote) return res.status(404).json({ message: "Cryptocurrency not found" });
       
       const whenDate = parseWhen(when);
-      if (!whenDate) return res.status(400).json({ message: "Invalid date in 'when'" });
+      if (!whenDate) return res.status(400).json({ message: "Please choose a date from today up to 3 years ahead" });
       const currentPrice = cryptoQuote.lastPrice;
       const cCost = await quotePrediction(userId, 'crypto', String(cryptoSymbol), whenDate, mode, riskLevel);
       const cCharge = await chargeOrReject(req, res, cCost, `Crypto prediction ${String(cryptoSymbol).toUpperCase()}`, { kind: 'crypto', symbol: String(cryptoSymbol).toUpperCase(), mode, risk: riskLevel, lines: cCost.lines });

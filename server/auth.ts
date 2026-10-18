@@ -1,4 +1,5 @@
 import { attachReferral } from "./referrals";
+import { recordTermsAcceptance, sendVerificationEmail } from "./emailVerification";
 import passport from "passport";
 import rateLimit from "express-rate-limit";
 import { Strategy as LocalStrategy } from "passport-local";
@@ -109,7 +110,7 @@ export function setupAuth(app: Express) {
   // Register
   app.post("/api/register", async (req, res, next) => {
     try {
-      const { password, confirmPassword, email, firstName, lastName, referralCode } = req.body;
+      const { password, confirmPassword, email, firstName, lastName, referralCode, acceptedTerms } = req.body;
       const username = typeof req.body.username === "string" ? req.body.username.trim() : "";
 
       if (!username || typeof password !== "string" || !password) {
@@ -120,6 +121,9 @@ export function setupAuth(app: Express) {
       }
       if (password.length < 8) {
         return res.status(400).json({ message: "Password must be at least 8 characters" });
+      }
+      if (acceptedTerms !== true) {
+        return res.status(400).json({ message: "Please accept the Terms and Conditions to create an account" });
       }
       // An email is needed so a forgotten password can be reset by mail
       const cleanEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
@@ -143,6 +147,8 @@ export function setupAuth(app: Express) {
 
       // Friend's referral code (optional). Failures here never block sign-up.
       if (referralCode) await attachReferral(newUser.id, referralCode);
+      await recordTermsAcceptance(newUser.id).catch((e) => console.error("[Terms] could not record acceptance:", e?.message || e));
+      void sendVerificationEmail(newUser.id).catch((e) => console.error("[Verify] could not send:", e?.message || e));
 
       req.login(newUser, (err) => {
         if (err) return next(err);

@@ -22,32 +22,29 @@ export default function Charts() {
     select: (data: any[]) => {
       if (!data || data.length === 0) return null;
       
-      // Only include predictions with actual prices (completed predictions)
-      const measured = data.filter((p: any) => p.actualPrice !== null && p.actualPrice !== undefined);
-      
+      // Only predictions already checked against the real price, scored the same way as the rest of the app:
+      // was the predicted direction right? (stored with the prediction when it was checked)
+      const outcomeOf = (p: any): boolean | null => {
+        try {
+          const snap = typeof p.aiLearning === 'string' ? JSON.parse(p.aiLearning) : p.aiLearning;
+          return typeof snap?.outcome?.finalCorrect === 'boolean' ? snap.outcome.finalCorrect : null;
+        } catch { return null; }
+      };
+      const measured = data.filter((p: any) => outcomeOf(p) !== null);
       if (measured.length === 0) return null;
-      
-      // Group by week for the chart
+
+      // Group by week (last 4 weeks) for the chart
       const weeklyData = new Map<string, { correct: number; total: number }>();
-      
       measured.forEach((pred: any) => {
-        const predDate = new Date(pred.createdAt);
-        const now = new Date();
-        const weeksDiff = Math.floor((now.getTime() - predDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
-        const weekKey = `Week ${Math.max(1, 4 - weeksDiff)}`;
-        
-        if (!weeklyData.has(weekKey)) {
-          weeklyData.set(weekKey, { correct: 0, total: 0 });
-        }
-        
-        const stats = weeklyData.get(weekKey)!;
+        const weeksDiff = Math.floor((Date.now() - new Date(pred.createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000));
+        if (weeksDiff > 3) return;                       // older than 4 weeks: not part of this chart
+        const weekKey = `Week ${4 - weeksDiff}`;
+        const stats = weeklyData.get(weekKey) ?? { correct: 0, total: 0 };
         stats.total++;
-        
-        // Check if prediction was accurate (actual price within predicted range)
-        const withinRange = pred.actualPrice >= pred.predLow && pred.actualPrice <= pred.predHigh;
-        if (withinRange) stats.correct++;
+        if (outcomeOf(pred)) stats.correct++;
+        weeklyData.set(weekKey, stats);
       });
-      
+
       // Convert to chart data - sort by week
       const weeks = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
       return weeks

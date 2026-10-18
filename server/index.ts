@@ -63,6 +63,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // rawBody is needed to verify Razorpay webhook signatures
+// Basic security headers (no CSP: the app loads third-party scripts such as Razorpay checkout)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  next();
+});
 app.use(express.json({ limit: '1mb', verify: (req: any, _res, buf) => { if (req.url?.startsWith('/api/payments/webhook')) req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));

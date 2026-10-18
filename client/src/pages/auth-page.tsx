@@ -1,3 +1,4 @@
+import { Checkbox } from "@/components/ui/checkbox";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,10 +62,13 @@ export default function AuthPage() {
     },
   });
 
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsHint, setTermsHint] = useState(false);
+
   const registerMutation = useMutation({
     mutationFn: async (userData: {
       username: string; password: string; confirmPassword: string;
-      email?: string; firstName?: string; lastName?: string; referralCode?: string;
+      email?: string; firstName?: string; lastName?: string; referralCode?: string; acceptedTerms?: boolean;
     }) => {
       const res = await apiRequest("POST", "/api/register", userData);
       if (!res.ok) {
@@ -95,6 +99,7 @@ export default function AuthPage() {
 
   const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!termsAccepted) { setTermsHint(true); return; }
     const formData = new FormData(e.currentTarget);
     registerMutation.mutate({
       username: formData.get("username") as string,
@@ -104,6 +109,7 @@ export default function AuthPage() {
       firstName: formData.get("firstName") as string,
       lastName: formData.get("lastName") as string,
       referralCode: referralCode || undefined,
+      acceptedTerms: termsAccepted,
     });
   };
 
@@ -185,6 +191,11 @@ export default function AuthPage() {
                     {referralValid === true && <p className="text-xs text-green-600">✓ Code accepted — your friend gets a reward when you make your first payment.</p>}
                     {referralValid === false && <p className="text-xs text-red-600">This code was not found. You can still sign up without it.</p>}
                   </div>
+                  <label className="flex items-start gap-2 text-sm cursor-pointer" htmlFor="register-terms">
+                    <Checkbox id="register-terms" checked={termsAccepted} onCheckedChange={(v) => { setTermsAccepted(v === true); setTermsHint(false); }} className="mt-0.5" data-testid="checkbox-register-terms" />
+                    <span>I agree to the <a href="/#consent" target="_blank" rel="noreferrer" className="text-primary underline">Terms and Conditions</a>. BullWiser only analyses Statistics &amp; Astrology through AI to give predictions, does not buy or sell anything, and I am responsible for my own profit or loss.</span>
+                  </label>
+                  {termsHint && !termsAccepted && <p className="text-sm text-red-600" role="alert">Please tick the box to accept the Terms and Conditions.</p>}
                   <Button type="submit" className="w-full" disabled={registerMutation.isPending}>
                     {registerMutation.isPending ? "Creating account..." : "Create Account"}
                   </Button>
