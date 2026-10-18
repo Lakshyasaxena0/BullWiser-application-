@@ -31,19 +31,6 @@ export default function SettingsPage() {
     profileImageUrl: user?.profileImageUrl || "",
   });
 
-  const [notificationSettings, setNotificationSettings] = useState({
-    predictionAlerts: true,
-    priceAlerts: false,
-    marketUpdates: true,
-    emailNotifications: true,
-    pushNotifications: false,
-  });
-
-  const [privacySettings, setPrivacySettings] = useState({
-    shareAnalytics: true,
-    marketingEmails: false,
-  });
-
   const [isEditing, setIsEditing] = useState(false);
 
   // Change password dialog
@@ -53,9 +40,18 @@ export default function SettingsPage() {
   // 2FA dialog
   const [show2FADialog, setShow2FADialog] = useState(false);
 
-  // Fetch real subscription data
-  const { data: subscriptions } = useQuery<any[]>({
-    queryKey: ["/api/user/subscriptions"],
+  // Switches are saved on the server (they follow you across devices)
+  const { data: savedSettings } = useQuery<{ predictionAlerts: boolean; emailNotifications: boolean; marketingEmails: boolean; shareAnalytics: boolean; email: string | null }>({
+    queryKey: ["/api/user/settings"],
+    enabled: isAuthenticated,
+  });
+  const saveSetting = useMutation({
+    mutationFn: async (patch: Record<string, boolean>) => (await apiRequest("PUT", "/api/user/settings", patch)).json(),
+    onSuccess: (data) => { queryClient.setQueryData(["/api/user/settings"], data); toast({ title: "Saved" }); },
+    onError: (e: Error) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
+  });
+  const { data: credits } = useQuery<{ balance: number; totalPurchased: number }>({
+    queryKey: ["/api/credits/me"],
     enabled: isAuthenticated,
   });
 
@@ -63,8 +59,6 @@ export default function SettingsPage() {
     queryKey: ["/api/user/predictions"],
     enabled: isAuthenticated,
   });
-
-  const activeSubscription = subscriptions?.find((s: any) => new Date(s.endTs * 1000) > new Date());
 
   useEffect(() => {
     if (user) {
@@ -87,9 +81,18 @@ export default function SettingsPage() {
     }
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64 = reader.result as string;
-      setProfileForm(prev => ({ ...prev, profileImageUrl: base64 }));
-      toast({ title: "Photo selected", description: "Click Save Changes to update your profile picture." });
+      // Shrink to 256×256 JPEG so it uploads quickly and fits the server limit
+      const img = new Image();
+      img.onload = () => {
+        const size = 256, c = document.createElement("canvas"); c.width = size; c.height = size;
+        const ctx = c.getContext("2d")!; const m = Math.min(img.width, img.height);
+        ctx.drawImage(img, (img.width - m) / 2, (img.height - m) / 2, m, m, 0, 0, size, size);
+        setProfileForm(prev => ({ ...prev, profileImageUrl: c.toDataURL("image/jpeg", 0.85) }));
+        setIsEditing(true);
+        toast({ title: "Photo selected", description: "Click Save Changes to update your profile picture." });
+      };
+      img.onerror = () => toast({ title: "Not an image", description: "Please choose a JPG, PNG or GIF file.", variant: "destructive" });
+      img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
   };
@@ -297,41 +300,25 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Choose how you want to be notified</CardDescription>
+              <CardDescription>Choose how you want to be told when a prediction has been checked against the real price</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {[
-                { key: "predictionAlerts", label: "Prediction Alerts", desc: "Get notified when predictions reach high confidence" },
-                { key: "priceAlerts", label: "Price Alerts", desc: "Receive alerts when stocks hit target prices" },
-                { key: "marketUpdates", label: "Market Updates", desc: "Stay informed about major market movements" },
+                { key: "predictionAlerts", label: "Prediction results", desc: "Tell me whether each prediction turned out right or wrong once its target date passes" },
+                { key: "emailNotifications", label: "Email", desc: `Send those results to ${savedSettings?.email || "my email address (add one in Profile)"}` },
               ].map(item => (
-                <div key={item.key} className="flex items-center justify-between">
+                <div key={item.key} className="flex items-center justify-between gap-4">
                   <div><Label>{item.label}</Label><p className="text-sm text-gray-500">{item.desc}</p></div>
                   <Switch
-                    checked={notificationSettings[item.key as keyof typeof notificationSettings]}
-                    onCheckedChange={checked => {
-                      setNotificationSettings(p => ({ ...p, [item.key]: checked }));
-                      toast({ title: `${item.label} ${checked ? "enabled" : "disabled"}` });
-                    }}
+                    checked={!!savedSettings?.[item.key as "predictionAlerts" | "emailNotifications"]}
+                    disabled={!savedSettings || saveSetting.isPending}
+                    onCheckedChange={checked => saveSetting.mutate({ [item.key]: checked })}
+                    data-testid={`switch-${item.key}`}
                   />
                 </div>
               ))}
-              <Separator />
-              {[
-                { key: "emailNotifications", label: "Email Notifications", desc: "Receive notifications via email" },
-                { key: "pushNotifications", label: "Push Notifications", desc: "Receive browser push notifications" },
-              ].map(item => (
-                <div key={item.key} className="flex items-center justify-between">
-                  <div><Label>{item.label}</Label><p className="text-sm text-gray-500">{item.desc}</p></div>
-                  <Switch
-                    checked={notificationSettings[item.key as keyof typeof notificationSettings]}
-                    onCheckedChange={checked => {
-                      setNotificationSettings(p => ({ ...p, [item.key]: checked }));
-                      toast({ title: `${item.label} ${checked ? "enabled" : "disabled"}` });
-                    }}
-                  />
-                </div>
-              ))}
+              {!savedSettings?.email && <p className="text-xs text-amber-700">No email on your account yet — add one under Profile to receive these.</p>}
+              <p className="text-xs text-gray-500">More alert types (price alerts, push notifications) will appear here when they are available.</p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -347,13 +334,13 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div><Label>Share Analytics</Label><p className="text-sm text-gray-500">Help improve BullWiser by sharing anonymous usage data</p></div>
-                  <Switch checked={privacySettings.shareAnalytics} onCheckedChange={checked => { setPrivacySettings(p => ({ ...p, shareAnalytics: checked })); toast({ title: `Analytics sharing ${checked ? "enabled" : "disabled"}` }); }} />
+                <div className="flex items-center justify-between gap-4">
+                  <div><Label>Share Analytics</Label><p className="text-sm text-gray-500">Allow anonymous, aggregate usage data to improve BullWiser</p></div>
+                  <Switch checked={!!savedSettings?.shareAnalytics} disabled={!savedSettings || saveSetting.isPending} onCheckedChange={checked => saveSetting.mutate({ shareAnalytics: checked })} data-testid="switch-shareAnalytics" />
                 </div>
-                <div className="flex items-center justify-between">
-                  <div><Label>Marketing Emails</Label><p className="text-sm text-gray-500">Receive promotional emails and feature updates</p></div>
-                  <Switch checked={privacySettings.marketingEmails} onCheckedChange={checked => { setPrivacySettings(p => ({ ...p, marketingEmails: checked })); toast({ title: `Marketing emails ${checked ? "enabled" : "disabled"}` }); }} />
+                <div className="flex items-center justify-between gap-4">
+                  <div><Label>Marketing Emails</Label><p className="text-sm text-gray-500">Receive offers and feature updates (never required for your account)</p></div>
+                  <Switch checked={!!savedSettings?.marketingEmails} disabled={!savedSettings || saveSetting.isPending} onCheckedChange={checked => saveSetting.mutate({ marketingEmails: checked })} data-testid="switch-marketingEmails" />
                 </div>
               </div>
 
@@ -412,17 +399,8 @@ export default function SettingsPage() {
                     <p className="text-sm mt-1 capitalize">{user?.role || "user"}</p>
                   </div>
                   <div>
-                    <Label className="text-sm font-medium text-gray-500">Subscription Status</Label>
-                    <div className="mt-1">
-                      {activeSubscription ? (
-                        <Badge className="bg-green-100 text-green-800">
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                          Active — {activeSubscription.mode}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-gray-600">No active subscription</Badge>
-                      )}
-                    </div>
+                    <Label className="text-sm font-medium text-gray-500">Credits</Label>
+                    <div className="mt-1 text-sm"><Badge className="bg-amber-100 text-amber-800"><CheckCircle className="h-3 w-3 mr-1" />{credits?.balance ?? "…"} left</Badge> <span className="text-gray-500">of {credits?.totalPurchased ?? 0} bought</span></div>
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Total Predictions</Label>
@@ -449,7 +427,7 @@ export default function SettingsPage() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This will permanently delete your account and all your data including predictions, watchlists and subscriptions. This cannot be undone.
+                        This will permanently delete your account and all your data including predictions, watchlist, credits and payment records. This cannot be undone.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

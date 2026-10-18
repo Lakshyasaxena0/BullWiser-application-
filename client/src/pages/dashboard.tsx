@@ -41,6 +41,9 @@ export default function Dashboard() {
         <StockRatePanel />
       </div>
 
+      {/* Live gainers / losers / most traded, scanned across ~100 NSE stocks */}
+      <TrendingStocks />
+
       {/* Charts section - Prediction Accuracy only (Market Performance removed) */}
       <Charts />
 
@@ -50,9 +53,6 @@ export default function Dashboard() {
           <ActivityFeed />
         </div>
         <div className="space-y-6">
-          {/* ✅ Trending Stocks Panel (Right Sidebar - Image 1) */}
-          <TrendingStocks />
-
           <CreditsSummary />
 
           {/* Training Status */}

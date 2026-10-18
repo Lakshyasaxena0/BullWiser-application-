@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import SelfLearningCard from "@/components/SelfLearningCard";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { RefreshCw, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp } from "lucide-react";
 
 // Helper function to format Indian date/time
@@ -50,10 +52,26 @@ export default function PredictionAnalytics() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'accurate' | 'inaccurate' | 'pending'>('all');
 
-  const { data: predictions, isLoading, refetch } = useQuery<PredictionAnalytics[]>({
+  const { toast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
+  const { data: predictions, isLoading } = useQuery<PredictionAnalytics[]>({
     queryKey: ['/api/predictions/history', { limit: 100 }],
     refetchOnMount: true,
   });
+
+  // Refresh = ask the server to score everything that has reached its target time, then reload every card on the page
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const r = await (await apiRequest('POST', '/api/predictions/check-now')).json().catch(() => null);
+      await Promise.all([
+        '/api/predictions/history', '/api/predictions/stats', '/api/predictions/calibration', '/api/predictions/performance', '/api/learning/summary',
+      ].map(k => queryClient.refetchQueries({ queryKey: [k] })));
+      toast({ title: 'Analytics refreshed', description: r?.message || 'Latest results loaded.' });
+    } catch (e: any) {
+      toast({ title: 'Could not refresh', description: e?.message || 'Please try again.', variant: 'destructive' });
+    } finally { setRefreshing(false); }
+  };
 
   const { data: stats } = useQuery<any>({
     queryKey: ['/api/predictions/stats'],
@@ -78,10 +96,10 @@ export default function PredictionAnalytics() {
     }
     
     if (prediction.isAccurate) {
-      return <Badge className="bg-green-100 text-green-800">✓ {prediction.accuracyScore}% Accurate</Badge>;
+      return <Badge className="bg-green-100 text-green-800">✓ Right call{prediction.accuracyScore === 100 ? ' · inside range' : ''}</Badge>;
     }
     
-    return <Badge className="bg-red-100 text-red-800">✗ {prediction.accuracyScore}% Accuracy</Badge>;
+    return <Badge className="bg-red-100 text-red-800">✗ Wrong call{prediction.accuracyScore === 100 ? ' · inside range' : ''}</Badge>;
   };
 
   const renderPredictionCard = (prediction: PredictionAnalytics) => {
@@ -323,9 +341,9 @@ export default function PredictionAnalytics() {
             Detailed analysis of your predictions with AI learning insights
           </p>
         </div>
-        <Button onClick={() => refetch()} disabled={isLoading} size="sm" variant="outline">
-          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
+        <Button onClick={handleRefresh} disabled={refreshing} size="sm" variant="outline" data-testid="button-refresh-analytics">
+          <RefreshCw className={`h-4 w-4 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+          {refreshing ? 'Checking…' : 'Refresh'}
         </Button>
       </div>
 
@@ -366,7 +384,7 @@ export default function PredictionAnalytics() {
             <CardContent className="pt-6">
               <div className="text-center">
                 <p className="text-3xl font-bold text-green-600">{stats.accuratePredictions}</p>
-                <p className="text-sm text-gray-600">Accurate ({stats.accuracyRate.toFixed(1)}%)</p>
+                <p className="text-sm text-gray-600">Right calls ({stats.accuracyRate.toFixed(1)}%)</p>
               </div>
             </CardContent>
           </Card>
@@ -374,7 +392,7 @@ export default function PredictionAnalytics() {
             <CardContent className="pt-6">
               <div className="text-center">
                 <p className="text-3xl font-bold text-purple-600">{stats.avgAccuracy.toFixed(1)}%</p>
-                <p className="text-sm text-gray-600">Avg Accuracy</p>
+                <p className="text-sm text-gray-600">Price inside predicted range</p>
               </div>
             </CardContent>
           </Card>
@@ -448,10 +466,9 @@ export default function PredictionAnalytics() {
       <Card className="bg-amber-50 border-amber-200">
         <CardContent className="pt-6">
           <p className="text-xs text-amber-800">
-            <strong>Note:</strong> This analytics page shows detailed insights into your predictions. 
-            Actual prices are populated when you provide feedback or when our AI monitoring system 
-            checks the predictions automatically. Use this data to understand pattern accuracy and 
-            refine your trading strategy.
+            <strong>Note:</strong> A prediction is marked "right" when the direction it called (up / down / flat) matched what the
+            real price did by the target date. "Inside range" is a separate check: did the real price land between the predicted low and high.
+            Results fill in automatically after each target date (every 2 hours), or press Refresh to check now.
           </p>
         </CardContent>
       </Card>

@@ -9,6 +9,36 @@ import { pool } from "./db";
 import { isAuthenticated } from "./auth";
 import { ensureWalletTables } from "./wallet";
 import { getUserPrefs } from "./credits";
+import { sendMail } from "./mailer";
+
+// Per-user switches that are stored on the server (so they follow the user across devices)
+export const SETTING_DEFAULTS = { predictionAlerts: true, emailNotifications: true, marketingEmails: false, shareAnalytics: true } as const;
+export type UserSettings = { [K in keyof typeof SETTING_DEFAULTS]: boolean };
+
+let settingsReady: Promise<void> | null = null;
+function ensureSettingsColumn() {
+  settingsReady ??= pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS settings JSONB NOT NULL DEFAULT '{}'::jsonb").then(() => undefined);
+  return settingsReady;
+}
+export async function getUserSettings(userId: string): Promise<UserSettings & { email: string | null }> {
+  await ensureSettingsColumn();
+  const r = await pool.query("SELECT settings, email FROM users WHERE id = $1", [userId]);
+  const raw = r.rows[0]?.settings ?? {};
+  const out: any = { email: r.rows[0]?.email ?? null };
+  for (const [k, d] of Object.entries(SETTING_DEFAULTS)) out[k] = typeof raw[k] === "boolean" ? raw[k] : d;
+  return out;
+}
+
+/** Email the owner when one of their predictions has been checked against the real price (only if they left the switches on). */
+export async function notifyPredictionResult(userId: string, info: { symbol: string; predicted: string; actual: string; changePct: number; correct: boolean }) {
+  try {
+    const st = await getUserSettings(userId);
+    if (!st.email || !st.emailNotifications || !st.predictionAlerts) return;
+    const verdict = info.correct ? "was right ✅" : "was wrong ❌";
+    const text = `Your BullWiser prediction for ${info.symbol} has reached its target date.\n\nWe called it ${info.predicted}; the real price moved ${info.changePct > 0 ? "+" : ""}${info.changePct}% (${info.actual}). The call ${verdict}.\n\nSee all results under Prediction Analytics. BullWiser gives analysis only — it does not buy or sell anything, and you are responsible for your own profit or loss.\n\nYou can turn these emails off in Settings → Notifications.`;
+    await sendMail({ to: st.email, subject: `BullWiser: your ${info.symbol} prediction ${info.correct ? "was right" : "was wrong"}`, text, html: text.replace(/\n/g, "<br>") });
+  } catch (e: any) { console.error("[Notify] prediction result email failed:", e?.message || e); }
+}
 
 export function registerUserSettingsRoutes(app: Express) {
   app.get("/api/user/preferences", isAuthenticated, async (req: any, res: Response) => {
@@ -26,6 +56,26 @@ export function registerUserSettingsRoutes(app: Express) {
         [req.user.id, useAi ?? null, useAstro ?? null]);
       res.json(await getUserPrefs(req.user.id));
     } catch { res.status(500).json({ message: "Could not save preferences" }); }
+  });
+
+  app.get("/api/user/settings", isAuthenticated, async (req: any, res: Response) => {
+    try { res.json(await getUserSettings(req.user.id)); }
+    catch { res.status(500).json({ message: "Could not load settings" }); }
+  });
+
+  app.put("/api/user/settings", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      await ensureSettingsColumn();
+      const patch: Record<string, boolean> = {};
+      for (const k of Object.keys(SETTING_DEFAULTS)) {
+        const v = (req.body || {})[k];
+        if (v === undefined) continue;
+        if (typeof v !== "boolean") return res.status(400).json({ message: `${k} must be true or false` });
+        patch[k] = v;
+      }
+      await pool.query("UPDATE users SET settings = COALESCE(settings, '{}'::jsonb) || $2::jsonb, updated_at = now() WHERE id = $1", [req.user.id, JSON.stringify(patch)]);
+      res.json(await getUserSettings(req.user.id));
+    } catch { res.status(500).json({ message: "Could not save settings" }); }
   });
 
   app.get("/api/predictions/feedback", isAuthenticated, async (req: any, res: Response) => {

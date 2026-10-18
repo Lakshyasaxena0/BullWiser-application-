@@ -15,9 +15,6 @@ export interface StockQuote {
   marketCap?: number;
   previousClose: number;
   timestamp: Date;
-  astrologyBias?: number;
-  horaInfluence?: string;
-  adjustedPrice?: number;
 }
 
 export interface IndexData {
@@ -103,49 +100,16 @@ const NSE_COMPANY_NAMES: Record<string, string> = {
 };
 
 
-// Deterministic pseudo-random fraction in [0,1) from symbol + hour (no Math.random)
-function seededFraction(symbol: string, hour: number): number {
-  let x = 0;
-  for (const c of symbol) x = (x * 31 + c.charCodeAt(0)) >>> 0;
-  x = Math.imul(x ^ (hour * 40503), 2654435761) >>> 0;
-  return (x % 1000) / 1000;
-}
-
-function calculateAstrologyBias(symbol: string): { bias: number; hora: string } {
-  const hour = new Date().getHours();
-  const horaRulers = [
-    'Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars',
-    'Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars',
-    'Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars',
-    'Sun', 'Venus', 'Mercury'
-  ];
-  const currentHora = horaRulers[hour];
-  const rnd = seededFraction(symbol, hour);
-  const symbolHash = symbol.charCodeAt(0) + symbol.length;
-  const horaIndex = horaRulers.indexOf(currentHora);
-  let bias = ((symbolHash * horaIndex) % 11) - 5;
-  switch (currentHora) {
-    case 'Jupiter': bias += rnd > 0.5 ? 2 : 1; break;
-    case 'Venus':   bias += rnd > 0.6 ? 1 : 0; break;
-    case 'Saturn':  bias -= rnd > 0.5 ? 2 : 1; break;
-    case 'Mars':    bias += rnd > 0.5 ? 1 : -1; break;
-    case 'Mercury': bias += rnd > 0.7 ? 1 : 0; break;
-    case 'Moon':    bias += (rnd - 0.5) * 2; break;
-    case 'Sun':     bias += rnd > 0.6 ? 1 : 0; break;
-  }
-  bias = Math.max(-5, Math.min(5, Math.round(bias)));
-  return { bias, hora: currentHora };
-}
-
-function applyAstrologyBias(quote: StockQuote): StockQuote {
-  const { bias, hora } = calculateAstrologyBias(quote.symbol);
-    return {
-    ...quote,
-    astrologyBias: bias,
-    horaInfluence: hora,
-    adjustedPrice: quote.lastPrice, // real market price — astro bias is a signal only, never alters price
-  };
-}
+/** Liquid NSE universe scanned for gainers / losers / most-traded (large + mid caps across sectors). */
+export const TRENDING_UNIVERSE = [
+  'RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','KOTAKBANK','HINDUNILVR','SBIN','BAJFINANCE','BHARTIARTL','ITC','AXISBANK','LT','ASIANPAINT','MARUTI',
+  'TITAN','NESTLEIND','SUNPHARMA','ULTRACEMCO','WIPRO','HCLTECH','TECHM','ADANIENT','ADANIPORTS','ADANIGREEN','ADANIPOWER','TATAMOTORS','TATASTEEL','TATAPOWER','TATACONSUM',
+  'JSWSTEEL','POWERGRID','NTPC','ONGC','COALINDIA','GRASIM','DRREDDY','CIPLA','DIVISLAB','APOLLOHOSP','HINDALCO','BPCL','IOC','BRITANNIA','VEDL','EICHERMOT',
+  'SHREECEM','INDUSINDBK','HEROMOTOCO','BAJAJFINSV','BAJAJ-AUTO','M&M','SBILIFE','HDFCLIFE','LICI','HAL','BEL','BDL','DLF','GODREJPROP','OBEROIRLTY',
+  'ZOMATO','IRCTC','PNB','BANKBARODA','CANBK','IDFCFIRSTB','YESBANK','FEDERALBNK','SUZLON','IDEA','NHPC','RECLTD','PFC','IRFC','TRENT','DMART',
+  'PIDILITIND','HAVELLS','SIEMENS','ABB','MUTHOOTFIN','CHOLAFIN','BHEL','SAIL','NMDC','GAIL','INDIGO','JIOFIN','VBL','POLYCAB','LUPIN','AUROPHARMA',
+  'TORNTPHARM','MAXHEALTH','PERSISTENT','COFORGE','MPHASIS','LTIM','DIXON','BOSCHLTD','TVSMOTOR','ASHOKLEY','CUMMINSIND','JINDALSTEL','NATIONALUM','HINDPETRO',
+];
 
 export class StockDataService {
   private cache = new Map<string, { data: any; timestamp: number }>();
@@ -185,9 +149,8 @@ export class StockDataService {
         previousClose: data.regularMarketPreviousClose ?? data.regularMarketPrice,
         timestamp: new Date(),
       };
-      const biasedQuote = applyAstrologyBias(quote);
-      this.setCacheData(cacheKey, biasedQuote);
-      return biasedQuote;
+      this.setCacheData(cacheKey, quote);
+      return quote;
     } catch (error) {
       console.error(`Error fetching Yahoo Finance NSE quote for ${symbol}:`, error);
       return null;
@@ -219,9 +182,8 @@ export class StockDataService {
         previousClose: data.regularMarketPreviousClose ?? data.regularMarketPrice,
         timestamp: new Date(),
       };
-      const biasedQuote = applyAstrologyBias(quote);
-      this.setCacheData(cacheKey, biasedQuote);
-      return biasedQuote;
+      this.setCacheData(cacheKey, quote);
+      return quote;
     } catch (error) {
       console.error(`Error fetching Yahoo Finance BSE quote for ${symbol}:`, error);
       return null;
@@ -271,50 +233,50 @@ export class StockDataService {
     }
   }
 
+  /** One batched Yahoo call for many NSE symbols (chunked) → map symbol → quote. Failed symbols are simply absent. */
+  private async batchNseQuotes(symbols: string[]): Promise<StockQuote[]> {
+    const out: StockQuote[] = [];
+    const chunks: string[][] = []; for (let i = 0; i < symbols.length; i += 40) chunks.push(symbols.slice(i, i + 40));
+    for (const chunk of chunks) {
+      try {
+        const rows = await yahooFinance.quote(chunk.map(sym => `${sym}.NS`), {}, { validateResult: false });
+        for (const data of (Array.isArray(rows) ? rows : [rows])) {
+          if (!data?.regularMarketPrice || !data.symbol) continue;
+          const symbol = String(data.symbol).replace(/\.NS$/, '');
+          out.push({
+            symbol, companyName: data.shortName || NSE_COMPANY_NAMES[symbol] || symbol, exchange: 'NSE',
+            lastPrice: data.regularMarketPrice, change: data.regularMarketChange ?? 0, changePercent: data.regularMarketChangePercent ?? 0,
+            volume: data.regularMarketVolume ?? 0, openPrice: data.regularMarketOpen ?? data.regularMarketPrice,
+            highPrice: data.regularMarketDayHigh ?? data.regularMarketPrice, lowPrice: data.regularMarketDayLow ?? data.regularMarketPrice,
+            marketCap: data.marketCap ?? 0, previousClose: data.regularMarketPreviousClose ?? data.regularMarketPrice, timestamp: new Date(),
+          });
+        }
+      } catch (e: any) { console.error('[Market] batch quote failed:', e?.message || e); }
+    }
+    return out;
+  }
+
   async getMarketOverview(): Promise<MarketOverview> {
     const cacheKey = 'market_overview';
     if (this.isCacheValid(cacheKey)) return this.getCachedData(cacheKey);
-    const fallback: MarketOverview = {
-      indices: {
-        nifty50:   { name: 'NIFTY 50',   value: 0, change: 0, changePercent: 0, timestamp: new Date() },
-        sensex:    { name: 'SENSEX',      value: 0, change: 0, changePercent: 0, timestamp: new Date() },
-        bankNifty: { name: 'BANK NIFTY', value: 0, change: 0, changePercent: 0, timestamp: new Date() },
-        niftyIT:   { name: 'NIFTY IT',   value: 0, change: 0, changePercent: 0, timestamp: new Date() },
-      },
-      topGainers: [],
-      topLosers: [],
-      mostActive: [],
-    };
+    const empty = (name: string): IndexData => ({ name, value: 0, change: 0, changePercent: 0, timestamp: new Date() });
     try {
-      const topStocks = [
-        'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK',
-        'KOTAKBANK', 'HINDUNILVR', 'SBIN', 'BAJFINANCE', 'BHARTIARTL',
-      ];
-      const [indices, stockQuotes] = await Promise.all([
-        this.getMarketIndices(),
-        Promise.all(topStocks.map(s => this.getNSEQuote(s))),
-      ]);
-      const validQuotes = stockQuotes.filter(Boolean) as StockQuote[];
-      const sortedByChange = [...validQuotes].sort((a, b) => (b.changePercent || 0) - (a.changePercent || 0));
-      const sortedByVolume = [...validQuotes].sort((a, b) => (b.volume || 0) - (a.volume || 0));
-      const findIndex = (name: string): IndexData =>
-        indices.find(i => i.name === name) ?? { name, value: 0, change: 0, changePercent: 0, timestamp: new Date() };
+      const [indices, quotes] = await Promise.all([this.getMarketIndices(), this.batchNseQuotes(TRENDING_UNIVERSE)]);
+      // Rank the whole universe on today's real move; "most active" = traded value (price × volume)
+      const byChange = [...quotes].sort((a, b) => (b.changePercent || 0) - (a.changePercent || 0));
+      const byValue = [...quotes].sort((a, b) => b.lastPrice * (b.volume || 0) - a.lastPrice * (a.volume || 0));
+      const find = (name: string): IndexData => indices.find(i => i.name === name) ?? empty(name);
       const overview: MarketOverview = {
-        indices: {
-          nifty50:   findIndex('NIFTY 50'),
-          sensex:    findIndex('SENSEX'),
-          bankNifty: findIndex('BANK NIFTY'),
-          niftyIT:   findIndex('NIFTY IT'),
-        },
-        topGainers: sortedByChange.slice(0, 5),
-        topLosers:  sortedByChange.slice(-5).reverse(),
-        mostActive: sortedByVolume.slice(0, 5),
+        indices: { nifty50: find('NIFTY 50'), sensex: find('SENSEX'), bankNifty: find('BANK NIFTY'), niftyIT: find('NIFTY IT') },
+        topGainers: byChange.filter(q => q.changePercent > 0).slice(0, 5),
+        topLosers: [...byChange].reverse().filter(q => q.changePercent < 0).slice(0, 5),
+        mostActive: byValue.slice(0, 5),
       };
-      this.setCacheData(cacheKey, overview);
+      if (quotes.length) this.setCacheData(cacheKey, overview);       // never cache an empty result
       return overview;
     } catch (error) {
       console.error('Error fetching market overview:', error);
-      return fallback;
+      return { indices: { nifty50: empty('NIFTY 50'), sensex: empty('SENSEX'), bankNifty: empty('BANK NIFTY'), niftyIT: empty('NIFTY IT') }, topGainers: [], topLosers: [], mostActive: [] };
     }
   }
 

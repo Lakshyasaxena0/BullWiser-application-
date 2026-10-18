@@ -63,7 +63,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // rawBody is needed to verify Razorpay webhook signatures
-app.use(express.json({ verify: (req: any, _res, buf) => { if (req.url?.startsWith('/api/payments/webhook')) req.rawBody = buf; } }));
+app.use(express.json({ limit: '1mb', verify: (req: any, _res, buf) => { if (req.url?.startsWith('/api/payments/webhook')) req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 

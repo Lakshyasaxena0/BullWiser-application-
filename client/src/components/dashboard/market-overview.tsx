@@ -13,27 +13,12 @@ export default function MarketOverview({ marketData }: MarketOverviewProps) {
     bankNifty: { value: 0, change: 0, changePercent: 0 },
   };
 
-  const trending: any[] = marketData?.topGainers?.length
-    ? marketData.topGainers
-    : marketData?.mostActive?.length
-    ? marketData.mostActive
-    : [];
 
   const getChangeColor = (change: number) =>
     change >= 0 ? "text-green-600" : "text-red-600";
 
   const getChangeIcon = (change: number) =>
     change >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />;
-
-  const getCompanyInitial = (symbol: string) => symbol.charAt(0);
-
-  const getCompanyColor = (symbol: string) => {
-    const colors = [
-      'bg-blue-500', 'bg-green-500', 'bg-purple-500',
-      'bg-red-500', 'bg-yellow-500', 'bg-indigo-500',
-    ];
-    return colors[symbol.length % colors.length];
-  };
 
   const formatPercent = (val: number) => {
     const fixed = val.toFixed(2);
@@ -108,55 +93,6 @@ export default function MarketOverview({ marketData }: MarketOverviewProps) {
         </CardContent>
       </Card>
 
-      {/* Trending Stocks */}
-      <Card className="shadow-sm border border-gray-200">
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold" data-testid="text-trending-title">
-            Trending Stocks
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {trending.length === 0 ? (
-            <div className="text-center py-6 text-gray-400 text-sm">
-              Loading live stock data...
-            </div>
-          ) : (
-            <div className="flex space-x-3 overflow-x-auto scrollbar-hide pb-2">
-              {trending.slice(0, 10).map((stock: any, index: number) => {
-                const price = stock.lastPrice ?? stock.price ?? 0;
-                const changePct = stock.changePercent ?? stock.change ?? 0;
-                return (
-                  <div
-                    key={stock.symbol}
-                    className="flex-shrink-0 bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors min-w-[140px]"
-                  >
-                    <div className="flex flex-col items-center space-y-2">
-                      <div className={`w-8 h-8 ${getCompanyColor(stock.symbol)} rounded-full flex items-center justify-center text-white text-sm font-semibold`}>
-                        {getCompanyInitial(stock.symbol)}
-                      </div>
-                      <div className="text-center">
-                        <p className="font-semibold text-gray-900 text-sm truncate" data-testid={`text-trending-symbol-${index}`}>
-                          {stock.symbol}
-                        </p>
-                        <p className="text-xs text-gray-500" data-testid={`text-trending-price-${index}`}>
-                          ₹{price > 0 ? price.toFixed(2) : '—'}
-                        </p>
-                      </div>
-                      <Badge
-                        className={`${getChangeColor(changePct)} bg-transparent border-0 p-0 text-xs font-medium`}
-                        data-testid={`badge-trending-change-${index}`}
-                      >
-                        {getChangeIcon(changePct)}
-                        {formatPercent(changePct)}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }

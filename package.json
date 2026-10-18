@@ -20,7 +20,9 @@
     "test:stats": "tsx server/longTermSelfTest.ts",
     "test:weights": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/weightsSelfTest.ts",
     "test:learning": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/learningSelfTest.ts",
-    "test:credits": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/creditsSelfTest.ts"
+    "test:credits": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/creditsSelfTest.ts",
+    "test:outlook": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/outlookSelfTest.ts",
+    "test:performance": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/performanceSelfTest.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

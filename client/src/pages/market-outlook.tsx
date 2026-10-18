@@ -7,11 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TrendingUp, TrendingDown, Minus, RefreshCw, Lock } from "lucide-react";
 import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 type Horizon = '1w' | '2w' | '3w' | '1m' | '2m' | '4m' | '6m' | '1y';
 
 interface SectorOutlook {
   sector: string;
+  probUpPct: number;
   signal: 'bullish' | 'bearish' | 'neutral';
   strength: 'strong' | 'moderate' | 'weak';
   confidence: number;
@@ -28,6 +30,7 @@ interface SectorOutlook {
 
 interface CryptoOutlook {
   symbol: string;
+  probUpPct: number;
   name: string;
   signal: 'bullish' | 'bearish' | 'neutral';
   strength: 'strong' | 'moderate' | 'weak';
@@ -68,27 +71,49 @@ function formatIndianDate(isoString: string): string {
   return `${day}/${month}/${year}`;
 }
 
+function Section({ icon, title, empty, children }: { icon: React.ReactNode; title: string; empty: string; children: React.ReactNode[] }) {
+  return (
+    <div>
+      <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">{icon}<span>{title}</span></h2>
+      {children.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+      ) : (
+        <Card className="p-8 text-center bg-gray-50"><p className="text-gray-500">{empty}</p></Card>
+      )}
+    </div>
+  );
+}
+
 export default function MarketOutlook() {
   const { isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const [selectedTab, setSelectedTab] = useState<'stocks' | 'crypto'>('stocks');
   const [horizon, setHorizon] = useState<Horizon>('1m');
 
-  const { data: outlook, isLoading, error, refetch } = useQuery({
-    queryKey: ['/api/market/outlook', { horizon, type: selectedTab }],
+  const { toast } = useToast();
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const { data: outlook, isLoading, isFetching, error, refetch } = useQuery({
+    // stocks + crypto come back together, so switching tabs never re-fetches (or re-charges credits)
+    queryKey: ['/api/market/outlook', { horizon, refreshNonce }],
     queryFn: async () => {
-      const response = await fetch(`/api/market/outlook?horizon=${horizon}&type=${selectedTab}`, {
+      const response = await fetch(`/api/market/outlook?horizon=${horizon}${refreshNonce ? '&refresh=1' : ''}`, {
         credentials: 'include',
+        cache: 'no-store',
       });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to fetch outlook');
-      }
-      return response.json();
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message || 'Failed to fetch outlook');
+      return body;
     },
     enabled: isAuthenticated,
-    retry: 1,
+    retry: false,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
+
+  const handleRefresh = async () => {
+    setRefreshNonce(n => n + 1);             // new key → forces a fresh fetch that skips the server's 15-minute cache
+    toast({ title: 'Refreshing outlook…', description: 'Pulling the latest prices and planetary positions.' });
+  };
 
   const horizons: { value: Horizon; label: string }[] = [
     { value: '1w', label: '1 Week' },
@@ -114,6 +139,8 @@ export default function MarketOutlook() {
       );
     }
   }
+
+  const genericError = error && !/credits|recharge|subscription/i.test((error as Error).message) ? (error as Error).message : null;
 
   const renderSectorCard = (sector: SectorOutlook) => {
     const signalConfig = {
@@ -150,7 +177,7 @@ export default function MarketOutlook() {
               {sector.signal}
             </Badge>
             <Badge variant="secondary">{sector.strength}</Badge>
-            <span className="text-xs text-gray-600">{sector.confidence}% conf.</span>
+            <span className="text-xs text-gray-600">{sector.confidence}% conf. · {sector.probUpPct}% chance of rise</span>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -160,7 +187,7 @@ export default function MarketOutlook() {
             </div>
             <div className="text-right">
               <span className="text-gray-500">High: </span>
-              <span className="font-medium text-green-600">+{sector.rangeHigh.toFixed(1)}%</span>
+              <span className="font-medium text-green-600">{sector.rangeHigh > 0 ? '+' : ''}{sector.rangeHigh.toFixed(1)}%</span>
             </div>
           </div>
 
@@ -255,7 +282,7 @@ export default function MarketOutlook() {
               {crypto.signal}
             </Badge>
             <Badge variant="secondary">{crypto.strength}</Badge>
-            <span className="text-xs text-gray-600">{crypto.confidence}% conf.</span>
+            <span className="text-xs text-gray-600">{crypto.confidence}% conf. · {crypto.probUpPct}% chance of rise</span>
           </div>
 
           <div className="text-xs">
@@ -270,7 +297,7 @@ export default function MarketOutlook() {
             </div>
             <div className="text-right">
               <span className="text-gray-500">High: </span>
-              <span className="font-medium text-green-600">+{crypto.rangeHigh.toFixed(1)}%</span>
+              <span className="font-medium text-green-600">{crypto.rangeHigh > 0 ? '+' : ''}{crypto.rangeHigh.toFixed(1)}%</span>
             </div>
           </div>
 
@@ -343,9 +370,9 @@ export default function MarketOutlook() {
             Sector & crypto trend forecast using Statistical Analysis (55%) + Vedic Astrology (45%)
           </p>
         </div>
-        <Button onClick={() => refetch()} disabled={isLoading} size="sm" variant="outline">
-          <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
+        <Button onClick={handleRefresh} disabled={isFetching} size="sm" variant="outline" data-testid="button-refresh-outlook">
+          <RefreshCw className={`h-4 w-4 mr-1 ${isFetching ? 'animate-spin' : ''}`} />
+          {isFetching ? 'Refreshing…' : 'Refresh'}
         </Button>
       </div>
 
@@ -399,65 +426,30 @@ export default function MarketOutlook() {
           </Card>
         )}
 
+        {genericError && (
+          <Card className="mt-4 border-red-200 bg-red-50"><CardContent className="pt-6 text-sm text-red-700">
+            Could not load the outlook: {genericError}. Press Refresh to try again.
+          </CardContent></Card>
+        )}
+
         {/* Stocks Tab */}
         <TabsContent value="stocks" className="space-y-6">
           {isLoading ? (
             <div className="text-center py-12">
               <RefreshCw className="h-8 w-8 animate-spin mx-auto text-primary" />
-              <p className="mt-2 text-gray-600">Loading market outlook...</p>
+              <p className="mt-2 text-gray-600">Analysing sector histories and planetary positions…</p>
             </div>
           ) : outlook?.stocks ? (
             <>
-              {/* Bullish Sectors */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">
-                  <TrendingUp className="h-5 w-5 text-green-600" />
-                  <span>Bullish Sectors ({outlook.stocks.bullish.length})</span>
-                </h2>
-                {outlook.stocks.bullish.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {outlook.stocks.bullish.map(renderSectorCard)}
-                  </div>
-                ) : (
-                  <Card className="p-8 text-center bg-gray-50">
-                    <p className="text-gray-500">No bullish sectors for this horizon</p>
-                  </Card>
-                )}
-              </div>
-
-              {/* Bearish Sectors - ALWAYS SHOW */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">
-                  <TrendingDown className="h-5 w-5 text-red-600" />
-                  <span>Bearish Sectors ({outlook.stocks.bearish.length})</span>
-                </h2>
-                {outlook.stocks.bearish.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {outlook.stocks.bearish.map(renderSectorCard)}
-                  </div>
-                ) : (
-                  <Card className="p-8 text-center bg-gray-50">
-                    <p className="text-gray-500">No bearish sectors for this horizon</p>
-                  </Card>
-                )}
-              </div>
-
-              {/* Neutral Sectors */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">
-                  <Minus className="h-5 w-5 text-gray-600" />
-                  <span>Neutral Sectors ({outlook.stocks.neutral.length})</span>
-                </h2>
-                {outlook.stocks.neutral.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {outlook.stocks.neutral.map(renderSectorCard)}
-                  </div>
-                ) : (
-                  <Card className="p-8 text-center bg-gray-50">
-                    <p className="text-gray-500">No neutral sectors for this horizon</p>
-                  </Card>
-                )}
-              </div>
+              <Section icon={<TrendingUp className="h-5 w-5 text-green-600" />} title="Top 4 Sectors — expected to perform best" empty="No sector is expected to rise over this horizon">
+                {outlook.stocks.topBullish.map(renderSectorCard)}
+              </Section>
+              <Section icon={<TrendingDown className="h-5 w-5 text-red-600" />} title="Bearish — top 4 sectors expected to fall" empty="No sector is expected to fall over this horizon">
+                {outlook.stocks.topBearish.map(renderSectorCard)}
+              </Section>
+              {outlook.stocks.unavailable?.length > 0 && (
+                <p className="text-xs text-gray-500">Price data unavailable right now for: {outlook.stocks.unavailable.join(', ')} (excluded, not estimated).</p>
+              )}
             </>
           ) : null}
         </TabsContent>
@@ -467,60 +459,19 @@ export default function MarketOutlook() {
           {isLoading ? (
             <div className="text-center py-12">
               <RefreshCw className="h-8 w-8 animate-spin mx-auto text-primary" />
-              <p className="mt-2 text-gray-600">Loading crypto outlook...</p>
+              <p className="mt-2 text-gray-600">Analysing coin histories and planetary positions…</p>
             </div>
           ) : outlook?.crypto ? (
             <>
-              {/* Bullish Crypto */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">
-                  <TrendingUp className="h-5 w-5 text-green-600" />
-                  <span>Bullish Crypto ({outlook.crypto.bullish.length})</span>
-                </h2>
-                {outlook.crypto.bullish.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {outlook.crypto.bullish.map(renderCryptoCard)}
-                  </div>
-                ) : (
-                  <Card className="p-8 text-center bg-gray-50">
-                    <p className="text-gray-500">No bullish crypto for this horizon</p>
-                  </Card>
-                )}
-              </div>
-
-              {/* Bearish Crypto - ALWAYS SHOW */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">
-                  <TrendingDown className="h-5 w-5 text-red-600" />
-                  <span>Bearish Crypto ({outlook.crypto.bearish.length})</span>
-                </h2>
-                {outlook.crypto.bearish.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {outlook.crypto.bearish.map(renderCryptoCard)}
-                  </div>
-                ) : (
-                  <Card className="p-8 text-center bg-gray-50">
-                    <p className="text-gray-500">No bearish crypto for this horizon</p>
-                  </Card>
-                )}
-              </div>
-
-              {/* Neutral Crypto */}
-              <div>
-                <h2 className="text-lg font-semibold flex items-center space-x-2 mb-3">
-                  <Minus className="h-5 w-5 text-gray-600" />
-                  <span>Neutral Crypto ({outlook.crypto.neutral.length})</span>
-                </h2>
-                {outlook.crypto.neutral.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {outlook.crypto.neutral.map(renderCryptoCard)}
-                  </div>
-                ) : (
-                  <Card className="p-8 text-center bg-gray-50">
-                    <p className="text-gray-500">No neutral crypto for this horizon</p>
-                  </Card>
-                )}
-              </div>
+              <Section icon={<TrendingUp className="h-5 w-5 text-green-600" />} title="Top 4 Coins — expected to perform best" empty="No coin is expected to rise over this horizon">
+                {outlook.crypto.topBullish.map(renderCryptoCard)}
+              </Section>
+              <Section icon={<TrendingDown className="h-5 w-5 text-red-600" />} title="Bearish — top 4 coins expected to fall" empty="No coin is expected to fall over this horizon">
+                {outlook.crypto.topBearish.map(renderCryptoCard)}
+              </Section>
+              {outlook.crypto.unavailable?.length > 0 && (
+                <p className="text-xs text-gray-500">Price data unavailable right now for: {outlook.crypto.unavailable.join(', ')} (excluded, not estimated).</p>
+              )}
             </>
           ) : null}
         </TabsContent>
@@ -530,8 +481,8 @@ export default function MarketOutlook() {
       <Card className="bg-amber-50 border-amber-200">
         <CardContent className="pt-6">
           <p className="text-xs text-amber-800">
-            <strong>Disclaimer:</strong> BullWiser outlook combines statistical analysis (RSI, MACD, Moving Averages) and 
-            Vedic astrology in a 55% statistics / 45% astrology model. This is not financial advice. Always do your own research before investing.
+            <strong>How this is made:</strong> {outlook?.method || 'Statistics 55% (the asset’s own price history) + Vedic astrology 45% (sidereal sky across the chosen period).'}{' '}
+            <strong>Disclaimer:</strong> an estimate, not a guarantee or financial advice. BullWiser does not buy or sell anything; you are responsible for your own profit or loss.
           </p>
         </CardContent>
       </Card>

@@ -8,6 +8,8 @@ import { longTermStatsService, LONG_TERM_DAYS } from "./longTermStatsService";
 import { statisticalAnalysisService } from "./statisticalAnalysisService";
 import { registerPaymentRoutes, isPaywallOn } from "./payments";
 import { registerReferralRoutes } from "./referrals";
+import { predictionMonitoringService } from "./predictionMonitoringService";
+import { registerPerformanceRoutes } from "./performance";
 import { registerCreditRoutes, chargeOrReject, refundCharge, quotePrediction, getUserPrefs } from "./credits";
 import { registerUserSettingsRoutes } from "./userSettings";
 import { enterRequestOptions } from "./requestOptions";
@@ -214,6 +216,7 @@ export function registerRoutes(app: Express): Server {
   registerReferralRoutes(app);
   registerPaymentRoutes(app);
   registerCreditRoutes(app);
+  registerPerformanceRoutes(app);
   registerUserSettingsRoutes(app);
 
   app.get('/api/warmup', async (req, res) => {
@@ -249,8 +252,12 @@ export function registerRoutes(app: Express): Server {
       if (!oCharge) return;
       req._charge = oCharge;
       console.log(`[Outlook] User ${userId} requesting ${horizon} ${type} outlook`);
-      const outlook = await marketOutlookService.generateOutlook(horizon);
-      const response: any = { generatedAt: outlook.generatedAt, horizon: outlook.horizon, targetDate: outlook.targetDate, daysAhead: outlook.daysAhead, marketSummary: outlook.marketSummary, stocks: outlook.stocks, crypto: outlook.crypto, stocksLocked: false, cryptoLocked: false };
+      const outlook = await marketOutlookService.generateOutlook(horizon, { refresh: req.query.refresh === '1' });
+      if (!outlook.stocks.all.length && !outlook.crypto.all.length) {
+        await refundCharge(req, req._charge, 'market data unavailable');
+        return res.status(503).json({ message: 'Market data is temporarily unavailable, so no outlook could be made. Your credits were not used — please try again in a few minutes.' });
+      }
+      const response: any = { generatedAt: outlook.generatedAt, horizon: outlook.horizon, targetDate: outlook.targetDate, daysAhead: outlook.daysAhead, marketSummary: outlook.marketSummary, method: outlook.method, stocks: outlook.stocks, crypto: outlook.crypto, stocksLocked: false, cryptoLocked: false };
       return res.json(response);
     } catch (error) {
       console.error('Market outlook error:', error);
@@ -357,7 +364,7 @@ export function registerRoutes(app: Express): Server {
       
       const isDevMode = process.env.NODE_ENV === 'development';
       const showAstroDetails = isDevMode && req.user?.role === 'developer';
-      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astrologyBias: realTimeQuote.astrologyBias || 0, horaInfluence: realTimeQuote.horaInfluence, astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
+      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
       
       const statisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Standard technical analysis applied';
       const astroReasoning = enhancedPrediction.astroRecommendation || (enhancedPrediction.warnings?.length > 0 ? enhancedPrediction.warnings.join('; ') : null);
@@ -386,7 +393,7 @@ export function registerRoutes(app: Express): Server {
       
       const whenDate = parseWhen(when);
       if (!whenDate) return res.status(400).json({ message: "Invalid date in 'when'" });
-      const currentPrice = cryptoQuote.adjustedPrice || cryptoQuote.lastPrice;
+      const currentPrice = cryptoQuote.lastPrice;
       const cCost = await quotePrediction(userId, 'crypto', String(cryptoSymbol), whenDate, mode, riskLevel);
       const cCharge = await chargeOrReject(req, res, cCost, `Crypto prediction ${String(cryptoSymbol).toUpperCase()}`, { kind: 'crypto', symbol: String(cryptoSymbol).toUpperCase(), mode, risk: riskLevel, lines: cCost.lines });
       if (!cCharge) return;
@@ -455,6 +462,19 @@ export function registerRoutes(app: Express): Server {
       }
       res.json({ total: r.rows.length, buckets: buckets.map(b => ({ label: b.label, n: b.n, hitRatePct: b.n ? Math.round((b.hit / b.n) * 100) : null })) });
     } catch (e) { res.status(500).json({ message: 'Error computing calibration' }); }
+  });
+
+  // Refresh button on the analytics page: score everything that has reached its target time right now
+  // (the cron job does this every 2 hours; this just lets the user pull it forward). One run at a time, max once a minute.
+  let checkRunning = false, lastCheckAt = 0;
+  app.post('/api/predictions/check-now', isAuthenticated, async (req: any, res) => {
+    try {
+      if (checkRunning || Date.now() - lastCheckAt < 60_000) return res.json({ ran: false, message: 'Predictions were checked a moment ago.' });
+      checkRunning = true;
+      try { await predictionMonitoringService.monitorDuePredictions(); lastCheckAt = Date.now(); }
+      finally { checkRunning = false; }
+      res.json({ ran: true, message: 'Checked every prediction that has reached its target time.' });
+    } catch (e) { res.status(500).json({ message: 'Could not check predictions right now' }); }
   });
 
   app.get('/api/predictions/stats', isAuthenticated, async (req: any, res) => {
@@ -896,6 +916,12 @@ export function registerRoutes(app: Express): Server {
     try {
       const userId = req.user.id;
       const { firstName, lastName, email, profileImageUrl } = req.body;
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) return res.status(400).json({ message: "Please enter a valid email address" });
+      if (email) {
+        const clash = await pool.query("SELECT 1 FROM users WHERE lower(email) = lower($1) AND id <> $2", [String(email), userId]);
+        if (clash.rows[0]) return res.status(409).json({ message: "That email is already used by another account" });
+      }
+      if (profileImageUrl && String(profileImageUrl).length > 700_000) return res.status(413).json({ message: "Profile picture is too large" });
       const [updated] = await db.update(users).set({ firstName: firstName || null, lastName: lastName || null, email: email || null, profileImageUrl: profileImageUrl || null, updatedAt: new Date() }).where(eq(users.id, userId)).returning();
       if (!updated) return res.status(404).json({ message: "User not found" });
       const { password: _, ...u } = updated;
@@ -945,14 +971,27 @@ export function registerRoutes(app: Express): Server {
       // Every child table has a non-cascading FK to users.id, so deleting the user row
       // alone failed with a constraint error for anyone who had any data. Remove the
       // dependent rows first, atomically.
-      await db.transaction(async (tx) => {
-        await tx.delete(watchlist).where(eq(watchlist.userId, userId));
-        await tx.delete(feedback).where(eq(feedback.userId, userId));
-        await tx.delete(predictions).where(eq(predictions.userId, userId));
-        await tx.delete(subscriptions).where(eq(subscriptions.userId, userId));
-        await tx.delete(astrologyCharts).where(eq(astrologyCharts.userId, userId));
-        await tx.delete(users).where(eq(users.id, userId));
-      });
+      // Clear EVERY table that points at this user (wallet, credit history, payments, referrals, feedback, …),
+      // found from the database's own foreign-key list so tables added later are covered automatically.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const fks = await client.query(`
+          SELECT c.conrelid::regclass::text AS tbl, a.attname AS col
+            FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+           WHERE c.contype = 'f' AND c.confrelid = 'users'::regclass AND c.conrelid <> 'users'::regclass`);
+        // a referral row can point at the user from either side; delete child-most tables first by retrying on FK errors
+        for (let pass = 0; pass < 3; pass++) {
+          for (const { tbl, col } of fks.rows) {
+            await client.query('SAVEPOINT s');
+            try { await client.query(`DELETE FROM ${tbl} WHERE ${JSON.stringify(col)} = $1`, [userId]); await client.query('RELEASE SAVEPOINT s'); }
+            catch { await client.query('ROLLBACK TO SAVEPOINT s'); }
+          }
+        }
+        await client.query('DELETE FROM users WHERE id = $1', [userId]);
+        await client.query('COMMIT');
+      } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+      finally { client.release(); }
       req.logout((err: any) => {
         if (err) console.error('[Account] Logout after delete failed:', err);
         res.json({ message: "Account deleted successfully" });

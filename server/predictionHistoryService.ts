@@ -119,20 +119,12 @@ export class PredictionHistoryService {
           // Deviation as percentage from predicted mid
           deviation = pred.deviation ?? ((actualPrice - predictedMid) / predictedMid) * 100;
           
-          // Accuracy score (0-100)
+          // "Accurate" = the direction call was right, judged by the same scored outcome the Portfolio card uses.
+          // Older predictions without a snapshot fall back to: did the real price land inside the predicted range?
           const withinRange = actualPrice >= pred.predLow && actualPrice <= pred.predHigh;
-          if (withinRange) {
-            // Perfect if within range
-            const rangeWidth = pred.predHigh - pred.predLow;
-            const distanceFromMid = Math.abs(actualPrice - predictedMid);
-            accuracyScore = Math.round(100 - (distanceFromMid / rangeWidth) * 50);
-          } else {
-            // Partial credit based on how close
-            const errorPercent = Math.abs(deviation);
-            accuracyScore = Math.max(0, Math.round(60 - errorPercent * 2));
-          }
-          
-          isAccurate = accuracyScore >= 60;
+          const outcome = parseSnapshot(pred.aiLearning as string | null)?.outcome;
+          isAccurate = outcome ? outcome.finalCorrect : withinRange;
+          accuracyScore = withinRange ? 100 : 0;      // 100 = inside the predicted range, 0 = outside
         }
         
         // Calculate days ahead
@@ -195,6 +187,7 @@ export class PredictionHistoryService {
       const accurate = withActualPrice.filter(p => p.isAccurate === true);
       const inaccurate = withActualPrice.filter(p => p.isAccurate === false);
       
+      // Share of checked predictions whose real price landed inside the predicted range
       const avgAccuracy = withActualPrice.length > 0
         ? withActualPrice.reduce((sum, p) => sum + (p.accuracyScore || 0), 0) / withActualPrice.length
         : 0;

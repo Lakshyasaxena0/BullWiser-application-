@@ -44,6 +44,12 @@ export function horizonExtra(days: number): number {
 /** Sector tier by typical long-run return potential (2 = high-return, 1 = medium, 0 = steady/low). Tunable table. */
 const HIGH_RETURN = ['Defence', 'Infrastructure & Cement', 'Power & Energy', 'Crypto', 'Real Estate', 'Engineering', 'Aviation', 'Technology & Foreign'];
 const MID_RETURN = ['IT & Software', 'Banking & Finance', 'Pharma', 'Steel & Metals', 'Mining', 'Automobiles', 'Retail', 'Hospitality', 'Telecom', 'Healthcare', 'Consumer Durables', 'Government/PSU', 'Luxury & Fashion', 'Chemicals', 'Shipping & Water'];
+const LOW_RETURN = ['FMCG', 'Insurance', 'Oil & Gas', 'Dairy & Food', 'Media', 'Gold', 'Education', 'Heavy Industry', 'Research & Spiritual', 'Trading & Logistics'];
+/** Every sector a user can pick in the cost calculator, with its return level (0 steady, 1 medium, 2 high). */
+export function sectorOptions(): { name: string; tier: number }[] {
+  return [...HIGH_RETURN.map(name => ({ name, tier: 2 })), ...MID_RETURN.map(name => ({ name, tier: 1 })), ...LOW_RETURN.map(name => ({ name, tier: 0 }))]
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 export function sectorTier(sectors: string[]): number {
   if (sectors.some(x => HIGH_RETURN.includes(x))) return 2;
   if (sectors.some(x => MID_RETURN.includes(x))) return 1;

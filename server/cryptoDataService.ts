@@ -19,9 +19,6 @@ export interface CryptoQuote {
   high24h: number;
   low24h: number;
   timestamp: Date;
-  astrologyBias?: number;
-  horaInfluence?: string;
-  adjustedPrice?: number;
 }
 
 export interface CryptoOverview {
@@ -92,63 +89,6 @@ const CRYPTO_NAMES: Record<string, string> = {
 };
 
 
-// Deterministic pseudo-random fraction in [0,1) from symbol + hour (no Math.random)
-function seededFraction(symbol: string, hour: number): number {
-  let x = 0;
-  for (const c of symbol) x = (x * 31 + c.charCodeAt(0)) >>> 0;
-  x = Math.imul(x ^ (hour * 40503), 2654435761) >>> 0;
-  return (x % 1000) / 1000;
-}
-
-function calculateCryptoAstrologyBias(symbol: string): { bias: number; hora: string } {
-  const hour = new Date().getHours();
-  const horaRulers = [
-    'Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars',
-    'Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars',
-    'Sun', 'Venus', 'Mercury', 'Moon', 'Saturn', 'Jupiter', 'Mars',
-    'Sun', 'Venus', 'Mercury'
-  ];
-  const currentHora = horaRulers[hour];
-  const rnd = seededFraction(symbol, hour);
-  const cryptoInfluence: Record<string, { base: number; volatility: number }> = {
-    'BTC':   { base: 2, volatility: 1.2 },
-    'ETH':   { base: 1, volatility: 1.1 },
-    'BNB':   { base: 0, volatility: 0.9 },
-    'ADA':   { base: 1, volatility: 0.8 },
-    'SOL':   { base: 2, volatility: 1.3 },
-    'XRP':   { base: -1, volatility: 1.1 },
-    'DOT':   { base: 1, volatility: 1.0 },
-    'MATIC': { base: 1, volatility: 0.9 },
-    'AVAX':  { base: 1, volatility: 1.2 },
-    'ATOM':  { base: 0, volatility: 1.0 },
-  };
-  const cryptoData = cryptoInfluence[symbol] || { base: 0, volatility: 1.0 };
-  const symbolHash = symbol.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-  const horaIndex = horaRulers.indexOf(currentHora);
-  let bias = ((symbolHash * horaIndex) % 11) - 5 + cryptoData.base;
-  switch (currentHora) {
-    case 'Jupiter': bias += rnd > 0.5 ? 2 : 1; break;
-    case 'Venus':   bias += rnd > 0.6 ? 1 : 0; break;
-    case 'Saturn':  bias -= rnd > 0.5 ? 2 : 1; break;
-    case 'Mars':    bias += rnd > 0.5 ? 2 : -2; break;
-    case 'Mercury': bias += rnd > 0.7 ? 1 : 0; break;
-    case 'Moon':    bias += (rnd - 0.5) * 3; break;
-    case 'Sun':     bias += rnd > 0.6 ? 1 : 0; break;
-  }
-  bias *= cryptoData.volatility;
-  bias = Math.max(-5, Math.min(5, Math.round(bias)));
-  return { bias, hora: currentHora };
-}
-
-function applyCryptoAstrologyBias(quote: CryptoQuote): CryptoQuote {
-  const { bias, hora } = calculateCryptoAstrologyBias(quote.symbol);
-  return {
-    ...quote,
-    astrologyBias: bias,
-    horaInfluence: hora,
-    adjustedPrice: quote.lastPrice, // real market price — astro bias is a signal only, never alters price
-  };
-}
 
 const COINGECKO_IDS: Record<string, string> = {
   BTC: 'bitcoin', ETH: 'ethereum', BNB: 'binancecoin', ADA: 'cardano', SOL: 'solana', XRP: 'ripple',
@@ -184,7 +124,7 @@ export class CryptoDataService {
   private marketRowToQuote(row: any, symbol: string): CryptoQuote | null {
     const price = Number(row?.current_price);
     if (!isFinite(price) || price <= 0) return null;
-    return applyCryptoAstrologyBias({
+    return ({
       symbol,
       name:             CRYPTO_NAMES[symbol] || row.name || symbol,
       lastPrice:        price,
@@ -221,7 +161,7 @@ export class CryptoDataService {
     const quoteRes = await axios.get(`${FINNHUB_BASE_URL}/quote`, { params: { symbol: finnhubSymbol, token: FINNHUB_API_KEY }, timeout: 8000 });
     const q = quoteRes.data;
     if (!q || !q.c) return null;
-    return applyCryptoAstrologyBias({
+    return ({
       symbol, name: CRYPTO_NAMES[symbol] || symbol, lastPrice: q.c, change24h: q.d ?? 0, changePercent24h: q.dp ?? 0,
       volume24h: 0, marketCap: 0, high24h: q.h ?? q.c, low24h: q.l ?? q.c, timestamp: new Date(),
     });

@@ -9,7 +9,7 @@ import { pool } from "./db";
 import { isAuthenticated } from "./auth";
 import { isPaywallOn, isPaymentsConfigured, createCreditOrder } from "./payments";
 import { getTotals, getBalance, spendCredits, refundSpend, recentTransactions, ensureWalletTables } from "./wallet";
-import { predictionCost, outlookCost, packList, validateLooseCredits, normStyle, normRisk, sectorTier, CREDIT_RUPEES, LOOSE_MIN, LOOSE_MAX, CostResult, Asset } from "./creditPricing";
+import { predictionCost, outlookCost, packList, validateLooseCredits, normStyle, normRisk, sectorTier, sectorOptions, CREDIT_RUPEES, LOOSE_MIN, LOOSE_MAX, CostResult, Asset } from "./creditPricing";
 import { sectorsForSymbol } from "./vedic/analysis";
 import { stockDataService } from "./stockDataService";
 import { cryptoDataService } from "./cryptoDataService";
@@ -42,12 +42,13 @@ export async function assetStats(asset: Asset, symbol: string, horizonDays: numb
 
 export const horizonDaysFrom = (when: Date) => Math.max(1, Math.ceil((when.getTime() - Date.now()) / 86400000));
 
-export async function quotePrediction(userId: string, asset: Asset, symbol: string, when: Date, style: unknown, risk: unknown): Promise<CostResult> {
+export async function quotePrediction(userId: string, asset: Asset, symbol: string, when: Date, style: unknown, risk: unknown, sectorOverride?: string): Promise<CostResult> {
   const prefs = await getUserPrefs(userId);
   const days = horizonDaysFrom(when);
-  const { potential, momentum } = await assetStats(asset, symbol, days);
-  const sectors = sectorsForSymbol(symbol, asset);
-  return predictionCost({ asset, style: normStyle(style), risk: normRisk(risk), horizonDays: days, useAi: prefs.useAi, useAstro: prefs.useAstro, potentialMovePct: potential, momentumPct: momentum, sectors, sectorTier: asset === 'crypto' ? 2 : sectorTier(sectors) });
+  // No symbol (cost calculator) → recent performance & benefit potential can't be measured, so they count at their minimum
+  const { potential, momentum } = symbol ? await assetStats(asset, symbol, days) : { potential: null, momentum: null };
+  const sectors = sectorOverride ? [sectorOverride] : sectorsForSymbol(symbol, asset);
+  return predictionCost({ asset, style: normStyle(style), risk: normRisk(risk), horizonDays: days, useAi: prefs.useAi, useAstro: prefs.useAstro, potentialMovePct: potential, momentumPct: momentum, sectors, sectorTier: sectorOverride ? sectorTier(sectors) : asset === 'crypto' ? 2 : sectorTier(sectors) });
 }
 
 export interface Charge { free: boolean; amount: number; txId?: number; balance?: number }
@@ -78,7 +79,7 @@ export function registerCreditRoutes(app: Express) {
       const [balance, history, totals] = await Promise.all([getBalance(req.user.id), recentTransactions(req.user.id, 40), getTotals(req.user.id)]);
       res.json({
         balance, history, ...totals,
-        creditRupees: CREDIT_RUPEES, packs: packList(), looseMin: LOOSE_MIN, looseMax: LOOSE_MAX,
+        creditRupees: CREDIT_RUPEES, packs: packList(), sectors: sectorOptions(), looseMin: LOOSE_MIN, looseMax: LOOSE_MAX,
         creditsRequired: isPaywallOn(),                 // false → free mode, nothing is deducted
         paymentsEnabled: isPaymentsConfigured(),
       });
@@ -94,7 +95,7 @@ export function registerCreditRoutes(app: Express) {
         const asset: Asset = b.kind === "crypto" ? "crypto" : "stock";
         const when = b.when ? new Date(b.when) : new Date(Date.now() + 30 * 86400000);
         if (isNaN(when.getTime())) return res.status(400).json({ message: "Invalid date" });
-        cost = await quotePrediction(req.user.id, asset, String(b.symbol || (asset === "stock" ? "TCS" : "BTC")), when, b.style ?? b.mode, b.riskLevel);
+        cost = await quotePrediction(req.user.id, asset, String(b.symbol || "").trim(), when, b.style ?? b.mode, b.riskLevel, b.sector ? String(b.sector) : undefined);
       }
       const balance = await getBalance(req.user.id);
       res.json({ ...cost, balance, creditsRequired: isPaywallOn(), enough: balance >= cost.credits });

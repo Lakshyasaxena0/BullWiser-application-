@@ -14,7 +14,7 @@ import { payForCredits } from "@/lib/razorpay";
 import { ReferralCard } from "@/components/ReferralCard";
 
 interface CreditsInfo {
-  balance: number; creditRupees: number; packs: { credits: number; rupees: number }[];
+  balance: number; sectors?: { name: string; tier: number }[]; creditRupees: number; packs: { credits: number; rupees: number }[];
   looseMin: number; looseMax: number; creditsRequired: boolean; paymentsEnabled: boolean;
   history: { id: number; delta: number; balanceAfter: number; kind: string; description: string; createdAt: string }[];
 }
@@ -29,15 +29,23 @@ export default function PlansPage() {
   const [buying, setBuying] = useState<number | null>(null);
 
   // cost calculator
-  const [calc, setCalc] = useState({ kind: "stock", style: "suggestion", riskLevel: "medium", days: "30" });
+  const [calc, setCalc] = useState({ kind: "stock", sector: "auto", symbol: "", riskLevel: "medium", days: "30", customDate: "" });
 
   const { data } = useQuery<CreditsInfo>({ queryKey: ["/api/credits/me"] });
 
+  const whenIso = () => {
+    if (calc.days === "custom") { const d = calc.customDate ? new Date(calc.customDate) : null; return d && !isNaN(d.getTime()) ? d.toISOString() : null; }
+    return new Date(Date.now() + Number(calc.days) * 86400000).toISOString();
+  };
+  const when = whenIso();
   const { data: quote } = useQuery<any>({
     queryKey: ["/api/credits/quote", calc],
+    enabled: !!when && new Date(when).getTime() > Date.now(),
     queryFn: async () => {
-      const when = new Date(Date.now() + Number(calc.days) * 86400000).toISOString();
-      const res = await apiRequest("POST", "/api/credits/quote", { kind: calc.kind, symbol: calc.kind === "stock" ? "TCS" : "BTC", when, style: calc.style, riskLevel: calc.riskLevel });
+      const res = await apiRequest("POST", "/api/credits/quote", {
+        kind: calc.kind, symbol: calc.symbol.trim().toUpperCase(), sector: calc.sector === "auto" ? undefined : calc.sector,
+        when, riskLevel: calc.riskLevel,
+      });
       return res.json();
     },
   });
@@ -124,26 +132,37 @@ export default function PlansPage() {
         <CardHeader>
           <CardTitle>How many credits will a prediction use?</CardTitle>
           <CardDescription>
-            The cost depends on the prediction style, risk level, how far ahead it looks, which engines are on (statistics, astrology, AI) and how big the possible move is.
+            The cost depends on which engines are on (statistics 4, astrology 4, AI 4), the risk level, how far ahead the date is (including a custom date), the sector's return level, the stock's recent performance and how big the possible move is.
             You always see the exact cost before you press Predict.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <div className="space-y-1"><Label>Asset</Label>
-              <Select value={calc.kind} onValueChange={(v) => setCalc({ ...calc, kind: v })}><SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={calc.kind} onValueChange={(v) => setCalc({ ...calc, kind: v, sector: "auto" })}><SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="stock">Stock</SelectItem><SelectItem value="crypto">Crypto</SelectItem></SelectContent></Select></div>
-            <div className="space-y-1"><Label>Style</Label>
-              <Select value={calc.style} onValueChange={(v) => setCalc({ ...calc, style: v })}><SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="suggestion">AI + Astro suggestion</SelectItem><SelectItem value="auto">Auto-trading signal</SelectItem></SelectContent></Select></div>
+            <div className="space-y-1"><Label>Sector</Label>
+              <Select value={calc.sector} onValueChange={(v) => setCalc({ ...calc, sector: v })}><SelectTrigger data-testid="select-calc-sector"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">{calc.symbol.trim() ? "Detect from symbol" : calc.kind === "crypto" ? "Crypto (default)" : "Not chosen"}</SelectItem>
+                  {(data?.sectors ?? []).map((s) => (<SelectItem key={s.name} value={s.name}>{s.name} {s.tier === 2 ? "· high return" : s.tier === 1 ? "· medium" : "· steady"}</SelectItem>))}
+                </SelectContent></Select></div>
+            <div className="space-y-1"><Label>Symbol <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <Input value={calc.symbol} onChange={(e) => setCalc({ ...calc, symbol: e.target.value })} placeholder={calc.kind === "stock" ? "e.g. TCS" : "e.g. BTC"} data-testid="input-calc-symbol" /></div>
             <div className="space-y-1"><Label>Risk</Label>
               <Select value={calc.riskLevel} onValueChange={(v) => setCalc({ ...calc, riskLevel: v })}><SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem></SelectContent></Select></div>
             <div className="space-y-1"><Label>Looks ahead</Label>
-              <Select value={calc.days} onValueChange={(v) => setCalc({ ...calc, days: v })}><SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="1">1 day</SelectItem><SelectItem value="7">1 week</SelectItem><SelectItem value="30">1 month</SelectItem><SelectItem value="90">3 months</SelectItem><SelectItem value="180">6 months</SelectItem><SelectItem value="365">1 year</SelectItem></SelectContent></Select></div>
+              <Select value={calc.days} onValueChange={(v) => setCalc({ ...calc, days: v })}><SelectTrigger data-testid="select-calc-days"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="1">1 day</SelectItem><SelectItem value="7">1 week</SelectItem><SelectItem value="30">1 month</SelectItem><SelectItem value="90">3 months</SelectItem><SelectItem value="180">6 months</SelectItem><SelectItem value="365">1 year</SelectItem><SelectItem value="custom">Custom date &amp; time</SelectItem></SelectContent></Select></div>
+            {calc.days === "custom" && (
+              <div className="space-y-1"><Label>Target date &amp; time</Label>
+                <Input type="datetime-local" min={new Date().toISOString().slice(0, 16)} value={calc.customDate} onChange={(e) => setCalc({ ...calc, customDate: e.target.value })} data-testid="input-calc-custom-date" /></div>
+            )}
           </div>
-          {quote && (
+          {calc.days === "custom" && !when && <p className="text-sm text-gray-500">Pick a future date and time to see the cost.</p>}
+          {!calc.symbol.trim() && <p className="text-xs text-gray-500">Enter a stock/coin symbol to include its recent performance and benefit potential; without one those two items count at their minimum.</p>}
+          {quote && when && (
             <div className="rounded-lg bg-gray-50 border p-4" data-testid="cost-breakdown">
               <ul className="text-sm space-y-1">
                 {quote.lines.map((l: any, i: number) => (<li key={i} className="flex justify-between gap-4"><span className="text-gray-600">{l.label}</span><span className="font-mono">{l.value}</span></li>))}

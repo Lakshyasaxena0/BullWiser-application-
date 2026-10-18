@@ -1,444 +1,239 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// marketOutlookService.ts — FIXED VERSION
-// Predicts bullish / bearish outlook for stock sectors and cryptocurrencies
-// Statistical Analysis (55%) + Vedic Astrology (45%)
-// 
-// KEY FIX: Now properly calculates planetary positions for TARGET DATE
-// instead of always using current date
+// marketOutlookService.ts
+// Anticipated top-performing and weakest sectors (stocks) and coins (crypto) for a chosen time horizon.
+//
+// Every number comes from real data — nothing is a fixed/made-up score:
+//   • Statistics (55%): each constituent's own price history (up to 8 years) → 20-year-style analog forecast
+//     (longTermStatsService): median / p10 / p90 return over the horizon, probability of a rise, volatility.
+//   • Astrology (45%): the real sidereal sky computed for dates across the window (vedic/analysis):
+//     sector karakatwa scores (stocks) and per-coin asset view (crypto).
+//     Astrology shifts the statistical expectation by at most ±½ of the asset's own horizon volatility.
+// A sector or coin whose price data cannot be fetched is listed under `unavailable`, never given a default score.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { stockDataService }          from './stockDataService';
-import { cryptoDataService }         from './cryptoDataService';
-import { astrologyService }          from './astrologyService';
-import { advancedAstrologyService }  from './advancedAstrologyService';
+import { stockDataService }           from './stockDataService';
 import { statisticalAnalysisService } from './statisticalAnalysisService';
+import { longTermStatsService, type LongTermStats } from './longTermStatsService';
+import { analyzeSky, sectorOutlook, assetView } from './vedic/analysis';
 
-// ── Sector → representative stocks ───────────────────────────────────────────
+// Sector name (matches the Vedic karakatwa sector names) → representative large caps
 const SECTOR_STOCKS: Record<string, string[]> = {
-  'IT':      ['TCS', 'INFY', 'WIPRO', 'HCLTECH', 'TECHM'],
-  'Banking': ['HDFCBANK', 'ICICIBANK', 'SBIN', 'AXISBANK', 'KOTAKBANK'],
-  'Pharma':  ['SUNPHARMA', 'DRREDDY', 'CIPLA', 'DIVISLAB', 'APOLLOHOSP'],
-  'Energy':  ['RELIANCE', 'ONGC', 'BPCL', 'NTPC', 'POWERGRID'],
-  'Auto':    ['MARUTI', 'TATAMOTORS', 'HEROMOTOCO', 'EICHERMOT', 'BAJAJFINSV'],
-  'FMCG':    ['HINDUNILVR', 'ITC', 'NESTLEIND', 'BRITANNIA', 'TITAN'],
-  'Metals':  ['TATASTEEL', 'JSWSTEEL', 'HINDALCO', 'VEDL', 'COALINDIA'],
-  'Realty':  ['ADANIENT', 'ADANIPORTS', 'DMART', 'IRCTC', 'ZOMATO'],
+  'IT & Software':           ['TCS', 'INFY', 'HCLTECH', 'WIPRO'],
+  'Banking & Finance':       ['HDFCBANK', 'ICICIBANK', 'SBIN', 'AXISBANK'],
+  'Pharma':                  ['SUNPHARMA', 'DRREDDY', 'CIPLA', 'DIVISLAB'],
+  'Oil & Gas':               ['RELIANCE', 'ONGC', 'BPCL', 'IOC'],
+  'Power & Energy':          ['NTPC', 'POWERGRID', 'TATAPOWER', 'ADANIGREEN'],
+  'Automobiles':             ['MARUTI', 'TATAMOTORS', 'EICHERMOT', 'HEROMOTOCO'],
+  'FMCG':                    ['HINDUNILVR', 'ITC', 'NESTLEIND', 'BRITANNIA'],
+  'Steel & Metals':          ['TATASTEEL', 'JSWSTEEL', 'HINDALCO', 'VEDL'],
+  'Infrastructure & Cement': ['LT', 'ULTRACEMCO', 'GRASIM', 'ADANIPORTS'],
+  'Real Estate':             ['DLF', 'GODREJPROP', 'OBEROIRLTY'],
+  'Telecom':                 ['BHARTIARTL', 'IDEA'],
+  'Defence':                 ['HAL', 'BEL', 'BDL'],
+  'Insurance':               ['SBILIFE', 'HDFCLIFE', 'LICI'],
+  'Consumer Durables':       ['TITAN', 'ASIANPAINT', 'HAVELLS'],
 };
 
-// ── Crypto list ───────────────────────────────────────────────────────────────
-const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'MATIC', 'AVAX', 'LINK'];
+const CRYPTO_SYMBOLS = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 'TRX', 'LTC', 'BCH', 'ATOM', 'NEAR', 'UNI', 'SHIB', 'SUI', 'APT', 'ARB'];
 const CRYPTO_NAMES: Record<string, string> = {
-  BTC: 'Bitcoin', ETH: 'Ethereum', BNB: 'BNB', SOL: 'Solana',
-  XRP: 'XRP', ADA: 'Cardano', DOGE: 'Dogecoin', MATIC: 'Polygon',
-  AVAX: 'Avalanche', LINK: 'Chainlink',
+  BTC: 'Bitcoin', ETH: 'Ethereum', BNB: 'BNB', SOL: 'Solana', XRP: 'XRP', ADA: 'Cardano', DOGE: 'Dogecoin', AVAX: 'Avalanche',
+  LINK: 'Chainlink', DOT: 'Polkadot', TRX: 'TRON', LTC: 'Litecoin', BCH: 'Bitcoin Cash', ATOM: 'Cosmos', NEAR: 'NEAR Protocol',
+  UNI: 'Uniswap', SHIB: 'Shiba Inu', SUI: 'Sui', APT: 'Aptos', ARB: 'Arbitrum',
 };
 
-// ── Sector planetary rulers ───────────────────────────────────────────────────
-const SECTOR_RULERS: Record<string, string[]> = {
-  'IT':      ['Mercury', 'Rahu'],
-  'Banking': ['Jupiter', 'Venus'],
-  'Pharma':  ['Moon', 'Jupiter'],
-  'Energy':  ['Sun', 'Mars'],
-  'Auto':    ['Mars', 'Saturn'],
-  'FMCG':    ['Venus', 'Moon'],
-  'Metals':  ['Saturn', 'Mars'],
-  'Realty':  ['Mars', 'Saturn'],
-};
+export const HORIZON_DAYS: Record<string, number> = { '1w': 7, '2w': 14, '3w': 21, '1m': 30, '2m': 60, '4m': 120, '6m': 180, '1y': 365 };
 
-// ── Crypto planetary rulers ───────────────────────────────────────────────────
-const CRYPTO_RULERS: Record<string, string> = {
-  BTC: 'Sun', ETH: 'Mercury', BNB: 'Venus', SOL: 'Mars',
-  XRP: 'Saturn', ADA: 'Jupiter', DOGE: 'Moon', MATIC: 'Moon',
-  AVAX: 'Mars', LINK: 'Mercury',
-};
-
-// ── Planetary bullish bias ────────────────────────────────────────────────────
-const PLANET_BIAS: Record<string, number> = {
-  Sun: 0.70, Moon: 0.50, Mars: 0.60, Mercury: 0.65,
-  Jupiter: 0.90, Venus: 0.80, Saturn: 0.30, Rahu: 0.40, Ketu: 0.35,
-};
-
-// ── Horizon → volatility band multiplier ─────────────────────────────────────
-const HORIZON_BAND: Record<string, number> = {
-  '1w': 0.04, '2w': 0.06, '3w': 0.08,
-  '1m': 0.10, '2m': 0.14, '4m': 0.18, '6m': 0.22, '1y': 0.30,
-};
-
-// ── Horizon → days ───────────────────────────────────────────────────────────
-export const HORIZON_DAYS: Record<string, number> = {
-  '1w': 7, '2w': 14, '3w': 21, '1m': 30,
-  '2m': 60, '4m': 120, '6m': 180, '1y': 365,
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 export interface SectorOutlook {
-  sector:             string;
-  signal:             'bullish' | 'bearish' | 'neutral';
-  strength:           'strong' | 'moderate' | 'weak';
-  confidence:         number;
-  changeEstimate:     number;        // expected % change
-  rangeLow:           number;        // e.g. -5 (%)
-  rangeHigh:          number;        // e.g. +12 (%)
-  statsScore:         number;        // 0-100
-  astroScore:         number;        // 0-100
-  keyFactors:         string[];
-  risks:              string[];
-  topStock:           string;
-  topStockChange:     number;
-  horizon:            string;
-  targetDate:         string;
+  sector: string; signal: 'bullish' | 'bearish' | 'neutral'; strength: 'strong' | 'moderate' | 'weak';
+  confidence: number; changeEstimate: number; rangeLow: number; rangeHigh: number;
+  statsScore: number; astroScore: number; probUpPct: number;
+  keyFactors: string[]; risks: string[]; topStock: string; topStockChange: number;
+  stocksAnalysed: number; horizon: string; targetDate: string;
 }
-
 export interface CryptoOutlook {
-  symbol:             string;
-  name:               string;
-  signal:             'bullish' | 'bearish' | 'neutral';
-  strength:           'strong' | 'moderate' | 'weak';
-  confidence:         number;
-  changeEstimate:     number;
-  rangeLow:           number;
-  rangeHigh:          number;
-  currentPrice:       number;
-  statsScore:         number;
-  astroScore:         number;
-  keyFactors:         string[];
-  risks:              string[];
-  horizon:            string;
-  targetDate:         string;
+  symbol: string; name: string; signal: 'bullish' | 'bearish' | 'neutral'; strength: 'strong' | 'moderate' | 'weak';
+  confidence: number; changeEstimate: number; rangeLow: number; rangeHigh: number; currentPrice: number;
+  statsScore: number; astroScore: number; probUpPct: number;
+  keyFactors: string[]; risks: string[]; horizon: string; targetDate: string;
 }
-
+interface Bucket<T> { bullish: T[]; bearish: T[]; neutral: T[]; all: T[]; topBullish: T[]; topBearish: T[]; unavailable: string[] }
 export interface MarketOutlookResult {
-  generatedAt:  string;
-  horizon:      string;
-  targetDate:   string;
-  daysAhead:    number;
-  stocks: {
-    bullish: SectorOutlook[];
-    bearish: SectorOutlook[];
-    neutral: SectorOutlook[];
-    all:     SectorOutlook[];
-  };
-  crypto: {
-    bullish: CryptoOutlook[];
-    bearish: CryptoOutlook[];
-    neutral: CryptoOutlook[];
-    all:     CryptoOutlook[];
-  };
-  marketSummary: string;
+  generatedAt: string; horizon: string; targetDate: string; daysAhead: number;
+  stocks: Bucket<SectorOutlook>; crypto: Bucket<CryptoOutlook>; marketSummary: string; method: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+const r2 = (x: number) => Math.round(x * 100) / 100;
+const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
+const std = (a: number[]) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1)); };
+const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
+
+/** Run async jobs with limited concurrency (keeps Yahoo / CoinGecko happy). */
+async function pool<T, R>(items: T[], size: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]); }
+  }));
+  return out;
+}
+
+const HISTORY_DAYS = 8 * 365;
+const HISTORY_TTL = 6 * 3600 * 1000;
+const RESULT_TTL = 15 * 60 * 1000;
 
 export class MarketOutlookService {
+  private bars = new Map<string, { at: number; value: any[] }>();
+  private results = new Map<string, { at: number; value: MarketOutlookResult }>();
 
-  // ── Main entry point ──────────────────────────────────────────────────────
-  async generateOutlook(horizon: string): Promise<MarketOutlookResult> {
-    const days       = HORIZON_DAYS[horizon] || 30;
+  private async history(key: string, loader: () => Promise<any[]>) {
+    const hit = this.bars.get(key);
+    if (hit && Date.now() - hit.at < HISTORY_TTL) return hit.value;
+    const raw = await loader().catch(() => []);
+    const bars = statisticalAnalysisService.normalizeYahooData(raw || []);
+    if (bars.length) this.bars.set(key, { at: Date.now(), value: bars });
+    return bars;
+  }
+  private stockBars(symbol: string) { return this.history(`S:${symbol}`, () => stockDataService.getHistoricalData(symbol, HISTORY_DAYS)); }
+  private cryptoBars(symbol: string) { return this.history(`C:${symbol}`, () => stockDataService.getYahooSeries(`${symbol}-USD`, HISTORY_DAYS)); }
+
+  /** Sky sample dates across the window (25/50/75/100%) – transits during the whole period matter, not just the last day. */
+  private sampleDates(days: number): Date[] {
+    return [0.25, 0.5, 0.75, 1].map(f => new Date(Date.now() + days * f * 86400000));
+  }
+
+  async generateOutlook(horizon: string, opts: { refresh?: boolean } = {}): Promise<MarketOutlookResult> {
+    const days = HORIZON_DAYS[horizon] || 30;
+    const cached = this.results.get(horizon);
+    if (!opts.refresh && cached && Date.now() - cached.at < RESULT_TTL) return cached.value;
+
     const targetDate = new Date(Date.now() + days * 86400000);
-    const band       = HORIZON_BAND[horizon] || 0.10;
+    const skies = this.sampleDates(days).map(d => analyzeSky(d));
 
-    console.log(`[Outlook] Generating ${horizon} outlook (${days} days ahead) → target: ${targetDate.toISOString().split('T')[0]}`);
+    const [stocks, crypto] = await Promise.all([this.analyzeSectors(horizon, targetDate, skies), this.analyzeCryptos(horizon, targetDate, skies)]);
+    const result: MarketOutlookResult = {
+      generatedAt: new Date().toISOString(), horizon, targetDate: targetDate.toISOString(), daysAhead: days,
+      stocks, crypto,
+      marketSummary: this.summary(horizon, stocks, crypto),
+      method: 'Statistics 55%: own price history (up to 8 years) → analog forecast over the horizon. Astrology 45%: sidereal sky sampled across the window; it can shift the expectation by at most half the asset\'s own horizon volatility.',
+    };
+    if (stocks.all.length || crypto.all.length) this.results.set(horizon, { at: Date.now(), value: result });   // never cache an empty (no-data) result
+    return result;
+  }
 
-    // ★ KEY FIX: Fetch astrology data for TARGET DATE, not current date
-    const [astroData, sectorOutlooks, cryptoOutlooks] = await Promise.all([
-      astrologyService.getCurrentAstrology(targetDate), // ← FIXED: was new Date()
-      this.analyzeSectors(horizon, days, band, targetDate), // ← Pass targetDate
-      this.analyzeCryptos(horizon, days, band, targetDate), // ← Pass targetDate
-    ]);
-
-    // Sort by changeEstimate descending
-    const allSectors = sectorOutlooks.sort((a, b) => b.changeEstimate - a.changeEstimate);
-    const allCryptos = cryptoOutlooks.sort((a, b) => b.changeEstimate - a.changeEstimate);
-
-    const stocksBullish = allSectors.filter(s => s.signal === 'bullish');
-    const stocksBearish = allSectors.filter(s => s.signal === 'bearish');
-    const stocksNeutral = allSectors.filter(s => s.signal === 'neutral');
-
-    const cryptoBullish = allCryptos.filter(c => c.signal === 'bullish');
-    const cryptoBearish = allCryptos.filter(c => c.signal === 'bearish');
-    const cryptoNeutral = allCryptos.filter(c => c.signal === 'neutral');
-
-    const marketSummary = this.buildMarketSummary(horizon, stocksBullish, stocksBearish, cryptoBullish, cryptoBearish, astroData);
-
-    console.log(`[Outlook] ${horizon} result: ${stocksBullish.length} bullish, ${stocksBearish.length} bearish, ${stocksNeutral.length} neutral sectors`);
-
+  private bucket<T extends { signal: string; changeEstimate: number }>(all: T[], unavailable: string[]): Bucket<T> {
+    const sorted = [...all].sort((a, b) => b.changeEstimate - a.changeEstimate);
     return {
-      generatedAt:  new Date().toISOString(),
-      horizon,
-      targetDate:   targetDate.toISOString(),
-      daysAhead:    days,
-      stocks: { bullish: stocksBullish, bearish: stocksBearish, neutral: stocksNeutral, all: allSectors },
-      crypto: { bullish: cryptoBullish, bearish: cryptoBearish, neutral: cryptoNeutral, all: allCryptos },
-      marketSummary,
+      all: sorted,
+      bullish: sorted.filter(x => x.signal === 'bullish'), bearish: sorted.filter(x => x.signal === 'bearish').reverse(), neutral: sorted.filter(x => x.signal === 'neutral'),
+      topBullish: sorted.filter(x => x.changeEstimate > 0).slice(0, 4),
+      topBearish: [...sorted].reverse().filter(x => x.changeEstimate < 0).slice(0, 4),
+      unavailable,
     };
   }
 
-  // ── Analyze all stock sectors ─────────────────────────────────────────────
-  private async analyzeSectors(horizon: string, days: number, band: number, targetDate: Date): Promise<SectorOutlook[]> {
-    // ★ KEY FIX: Get astrology data for TARGET DATE
-    const astroData  = await astrologyService.getCurrentAstrology(targetDate); // ← FIXED: was new Date()
+  // ── Stocks: sectors ───────────────────────────────────────────────────────
+  private async analyzeSectors(horizon: string, targetDate: Date, skies: ReturnType<typeof analyzeSky>[]): Promise<Bucket<SectorOutlook>> {
+    // Astro: average the sector karakatwa score over the sampled dates, then z-normalise across sectors
+    const names = Object.keys(SECTOR_STOCKS);
+    const raw: Record<string, number> = {}; const why: Record<string, string[]> = {};
+    for (const n of names) raw[n] = 0;
+    skies.forEach((sky, i) => {
+      const o = sectorOutlook(sky); const map = new Map(o.map(x => [x.sector, x]));
+      for (const n of names) { raw[n] += (map.get(n)?.score ?? 0) / skies.length; if (i === skies.length - 1) why[n] = map.get(n)?.reasons ?? []; }
+    });
+    const vals = names.map(n => raw[n]); const mu = mean(vals), sd = std(vals) || 1;
+    const tilt = (n: string) => clamp(((raw[n] - mu) / sd) / 2, -1, 1);
 
-    const results = await Promise.all(
-      Object.entries(SECTOR_STOCKS).map(async ([sector, stocks]) => {
-        return this.analyzeSingleSector(sector, stocks, horizon, days, band, targetDate, astroData);
-      })
-    );
+    // Stats for every constituent (concurrency-limited, cached)
+    const all = names.flatMap(n => SECTOR_STOCKS[n].map(s => ({ sector: n, symbol: s })));
+    const lt = new Map<string, LongTermStats | null>();
+    await pool(all, 6, async ({ symbol }) => {
+      const bars = await this.stockBars(symbol);
+      lt.set(symbol, bars.length >= 260 ? longTermStatsService.analyze(symbol, bars, targetDate) : null);
+    });
 
-    return results.filter(Boolean) as SectorOutlook[];
-  }
-
-  private async analyzeSingleSector(
-    sector: string, stocks: string[], horizon: string,
-    days: number, band: number, targetDate: Date, astroData: any
-  ): Promise<SectorOutlook> {
-    // ── Statistical: fetch quotes and historical for representative stocks ──
-    let statsScore   = 50;
-    let topStock     = stocks[0];
-    let topChange    = 0;
-    let statsFactors: string[] = [];
-    let statsRisks:   string[] = [];
-
-    try {
-      // Use first 2 stocks to keep API calls manageable
-      const sampleStocks = stocks.slice(0, 2);
-      const statsResults = await Promise.all(
-        sampleStocks.map(async symbol => {
-          try {
-            const hist = await stockDataService.getHistoricalData(symbol, Math.min(days + 30, 90));
-            if (hist && hist.length >= 10) {
-              const bars = statisticalAnalysisService.normalizeYahooData(hist);
-              return statisticalAnalysisService.analyzeHistoricalData(symbol, bars);
-            }
-            return null;
-          } catch { return null; }
-        })
-      );
-
-      const validStats = statsResults.filter(Boolean);
-      if (validStats.length > 0) {
-        statsScore = Math.round(validStats.reduce((s, r) => s + (r!.statisticalScore), 0) / validStats.length);
-        const best = validStats.reduce((a, b) => (a!.statisticalScore > b!.statisticalScore ? a : b));
-        topStock   = best!.symbol;
-        topChange  = best!.momentum.roc20;
-
-        // Collect key factors from best performing stock
-        statsFactors = best!.keyFindings.slice(0, 3);
-        statsRisks   = best!.keyRisks.slice(0, 2);
-
-        // Add sector-level factor
-        const trend = best!.movingAverages.trend;
-        if (trend === 'uptrend')   statsFactors.unshift(`${sector} sector in technical uptrend`);
-        if (trend === 'downtrend') statsRisks.unshift(`${sector} sector in technical downtrend`);
-      }
-    } catch (err) {
-      console.error(`[Outlook] Stats error for ${sector}:`, err);
+    const out: SectorOutlook[] = []; const unavailable: string[] = [];
+    for (const sector of names) {
+      const stats = SECTOR_STOCKS[sector].map(s => lt.get(s)).filter((x): x is LongTermStats => !!x);
+      if (!stats.length) { unavailable.push(sector); continue; }
+      const statsExp = mean(stats.map(s => s.forecast.medianReturnPct));
+      const sigma = mean(stats.map(s => s.profile.annualVolPct * Math.sqrt(s.horizonDays / 252)));
+      const astroT = tilt(sector);
+      const astroExp = astroT * 0.5 * sigma;
+      const expected = 0.55 * statsExp + 0.45 * astroExp;
+      const best = stats.reduce((a, b) => (a.forecast.medianReturnPct > b.forecast.medianReturnPct ? a : b));
+      const agree = (statsExp >= 0) === (astroExp >= 0);
+      const confidence = Math.round(clamp(mean(stats.map(s => s.confidence)) + (agree ? 5 : -8), 30, 85));
+      const score = 50 + 50 * Math.tanh(expected / (sigma || 1));
+      const signal = expected > 0.15 * sigma ? 'bullish' : expected < -0.15 * sigma ? 'bearish' : 'neutral';
+      const dev = Math.abs(expected) / (sigma || 1);
+      const shift = expected - statsExp;
+      out.push({
+        sector, signal, strength: dev > 0.6 ? 'strong' : dev > 0.3 ? 'moderate' : 'weak', confidence,
+        changeEstimate: r2(expected),
+        rangeLow: r2(mean(stats.map(s => s.forecast.p10ReturnPct)) + shift), rangeHigh: r2(mean(stats.map(s => s.forecast.p90ReturnPct)) + shift),
+        statsScore: Math.round(mean(stats.map(s => s.score))), astroScore: Math.round(50 + 50 * astroT),
+        probUpPct: Math.round(mean(stats.map(s => s.forecast.probUpPct))),
+        keyFactors: [
+          `${stats.length} of ${SECTOR_STOCKS[sector].length} constituents analysed; typical outcome ${r2(statsExp)}% over ${horizon} (historical analogs)`,
+          ...best.keyFindings.slice(0, 2).map(f => `${best.symbol}: ${f}`),
+          ...(why[sector] ?? []).slice(0, 3).map(f => `Astro: ${f}`),
+        ].slice(0, 6),
+        risks: [...new Set(stats.flatMap(s => s.keyRisks))].slice(0, 3),
+        topStock: best.symbol, topStockChange: r2(best.forecast.medianReturnPct),
+        stocksAnalysed: stats.length, horizon, targetDate: targetDate.toISOString(),
+      });
     }
+    return this.bucket(out, unavailable);
+  }
 
-    // ── Astrological: sector planetary rulers ─────────────────────────────
-    const rulers    = SECTOR_RULERS[sector] || ['Mercury'];
-    let astroScore  = 50;
-    const astroFactors: string[] = [];
+  // ── Crypto: coins ─────────────────────────────────────────────────────────
+  private async analyzeCryptos(horizon: string, targetDate: Date, skies: ReturnType<typeof analyzeSky>[]): Promise<Bucket<CryptoOutlook>> {
+    const results = await pool(CRYPTO_SYMBOLS, 5, async (symbol) => {
+      const bars = await this.cryptoBars(symbol);
+      const lt = bars.length >= 260 ? longTermStatsService.analyze(symbol, bars, targetDate) : null;
+      return { symbol, lt, last: bars.length ? bars[bars.length - 1].close : 0 };
+    });
 
-    try {
-      const planetaryPositions = astroData.planetaryPositions || [];
-      let totalBias = 0;
-
-      for (const ruler of rulers) {
-        const pos = planetaryPositions.find((p: any) => p.planet === ruler);
-        const bias = PLANET_BIAS[ruler] || 0.5;
-
-        let rulerScore = bias * 100;
-        if (pos?.retrograde) rulerScore = 100 - rulerScore;
-
-        // Exaltation / debilitation bonus
-        const exaltations: Record<string, string> = {
-          Sun: 'Aries', Moon: 'Taurus', Mars: 'Capricorn',
-          Mercury: 'Virgo', Jupiter: 'Cancer', Venus: 'Pisces', Saturn: 'Libra',
-        };
-        const debilitations: Record<string, string> = {
-          Sun: 'Libra', Moon: 'Scorpio', Mars: 'Cancer',
-          Mercury: 'Pisces', Jupiter: 'Capricorn', Venus: 'Virgo', Saturn: 'Aries',
-        };
-
-        if (pos && exaltations[ruler] === pos.sign) {
-          rulerScore *= 1.2;
-          astroFactors.push(`${ruler} exalted in ${pos.sign} — strong support for ${sector}`);
-        } else if (pos && debilitations[ruler] === pos.sign) {
-          rulerScore *= 0.8;
-          astroFactors.push(`${ruler} debilitated in ${pos.sign} — challenges for ${sector}`);
-        } else if (pos) {
-          astroFactors.push(`${ruler} in ${pos.sign}${pos.retrograde ? ' (retrograde)' : ''}`);
-        }
-
-        totalBias += rulerScore;
-      }
-
-      astroScore = Math.round(Math.min(100, Math.max(0, totalBias / rulers.length)));
-
-      // Advanced sector analysis with TARGET DATE
-      const advanced = await advancedAstrologyService.analyzeStockBySector(stocks[0], sector, targetDate).catch(() => null);
-      if (advanced) {
-        astroScore = Math.round((astroScore + advanced.sectorStrength) / 2);
-        if (advanced.timing === 'excellent') astroFactors.push(`Excellent planetary timing for ${sector} on ${horizon} horizon`);
-        if (advanced.timing === 'challenging') astroFactors.push(`Challenging planetary period for ${sector} ahead`);
-        if (advanced.keyFactors?.length) astroFactors.push(...advanced.keyFactors.slice(0, 2));
-      }
-    } catch (err) {
-      console.error(`[Outlook] Astro error for ${sector}:`, err);
+    const out: CryptoOutlook[] = []; const unavailable: string[] = [];
+    for (const { symbol, lt, last } of results) {
+      if (!lt) { unavailable.push(symbol); continue; }
+      const views = skies.map(sky => assetView(sky, symbol, 'crypto'));
+      const astroT = clamp(mean(views.map(v => v.score)), -1, 1);
+      const sigma = lt.profile.annualVolPct * Math.sqrt(lt.horizonDays / 252);
+      const statsExp = lt.forecast.medianReturnPct;
+      const astroExp = astroT * 0.5 * sigma;
+      const expected = 0.55 * statsExp + 0.45 * astroExp;
+      const agree = (statsExp >= 0) === (astroExp >= 0);
+      const dev = Math.abs(expected) / (sigma || 1);
+      const shift = expected - statsExp;
+      const last_ = views[views.length - 1];
+      out.push({
+        symbol, name: CRYPTO_NAMES[symbol] || symbol,
+        signal: expected > 0.15 * sigma ? 'bullish' : expected < -0.15 * sigma ? 'bearish' : 'neutral',
+        strength: dev > 0.6 ? 'strong' : dev > 0.3 ? 'moderate' : 'weak',
+        confidence: Math.round(clamp(lt.confidence - 5 + (agree ? 5 : -8), 30, 80)),
+        changeEstimate: r2(expected), rangeLow: r2(lt.forecast.p10ReturnPct + shift), rangeHigh: r2(lt.forecast.p90ReturnPct + shift),
+        currentPrice: last,
+        statsScore: Math.round(lt.score), astroScore: Math.round(50 + 50 * astroT), probUpPct: Math.round(lt.forecast.probUpPct),
+        keyFactors: [...lt.keyFindings.slice(0, 3), ...last_.reasons.slice(0, 2).map(f => `Astro: ${f}`)].slice(0, 5),
+        risks: [...lt.keyRisks.slice(0, 2), 'Crypto is highly volatile; ranges are wide'].slice(0, 3),
+        horizon, targetDate: targetDate.toISOString(),
+      });
     }
-
-    // ── Combine 55/45 ─────────────────────────────────────────────────────
-    const combinedScore = Math.round((statsScore * 0.55) + (astroScore * 0.45));
-    const signal: SectorOutlook['signal'] = combinedScore > 60 ? 'bullish' : combinedScore < 40 ? 'bearish' : 'neutral';
-    const confidence = Math.round(40 + Math.abs(combinedScore - 50) * 1.1);
-
-    // ── Change estimate based on score and horizon band ───────────────────
-    const scoreBias = (combinedScore - 50) / 50; // -1 to +1
-    const changeEstimate = Math.round(scoreBias * band * 100 * 100) / 100;
-    const rangeLow  = Math.round((changeEstimate - band * 50) * 100) / 100;
-    const rangeHigh = Math.round((changeEstimate + band * 50) * 100) / 100;
-
-    const strength: SectorOutlook['strength'] =
-      Math.abs(combinedScore - 50) > 20 ? 'strong' :
-      Math.abs(combinedScore - 50) > 10 ? 'moderate' : 'weak';
-
-    const allFactors = [...statsFactors, ...astroFactors].slice(0, 5);
-    const allRisks   = [...statsRisks].slice(0, 3);
-    if (signal === 'bearish' && allRisks.length < 2) allRisks.push(`${sector} sector faces headwinds over ${horizon} horizon`);
-
-    return {
-      sector, signal, strength, confidence, changeEstimate, rangeLow, rangeHigh,
-      statsScore, astroScore,
-      keyFactors: allFactors.length > 0 ? allFactors : [`${sector} sector analysis based on ${horizon} horizon`],
-      risks:      allRisks.length  > 0 ? allRisks  : [],
-      topStock, topStockChange: Math.round(topChange * 100) / 100,
-      horizon, targetDate: targetDate.toISOString(),
-    };
+    return this.bucket(out, unavailable);
   }
 
-  // ── Analyze all cryptocurrencies ──────────────────────────────────────────
-  private async analyzeCryptos(horizon: string, days: number, band: number, targetDate: Date): Promise<CryptoOutlook[]> {
-    // ★ KEY FIX: Get astrology for TARGET DATE
-    const astroData = await astrologyService.getCurrentAstrology(targetDate); // ← FIXED: was new Date()
-
-    const results = await Promise.all(
-      CRYPTO_SYMBOLS.map(symbol => this.analyzeSingleCrypto(symbol, horizon, days, band, astroData, targetDate))
-    );
-
-    return results.filter(Boolean) as CryptoOutlook[];
-  }
-
-  private async analyzeSingleCrypto(
-    symbol: string, horizon: string, days: number, band: number, astroData: any, targetDate: Date
-  ): Promise<CryptoOutlook | null> {
-    // Crypto gets higher volatility band
-    const cryptoBand = band * 1.5;
-
-    // ── Get current price ─────────────────────────────────────────────────
-    let currentPrice = 0;
-    try {
-      const quote = await cryptoDataService.getCryptoQuote(symbol);
-      currentPrice = quote?.lastPrice || 0;
-    } catch { /* use 0 */ }
-
-    // ── Statistical: use quote history if available ───────────────────────
-    let statsScore   = 50;
-    let statsFactors: string[] = [];
-    let statsRisks:   string[] = [];
-
-    try {
-      const hist = await cryptoDataService.getCryptoHistoricalData(symbol, Math.min(days + 30, 90));
-      if (hist && hist.length >= 10) {
-        const bars = statisticalAnalysisService.normalizeYahooData(hist);
-        const result = statisticalAnalysisService.analyzeHistoricalData(symbol, bars);
-        if (result) {
-          statsScore   = result.statisticalScore;
-          statsFactors = result.keyFindings.slice(0, 3);
-          statsRisks   = result.keyRisks.slice(0, 2);
-        }
-      }
-    } catch { /* skip */ }
-
-    // ── Astrological ──────────────────────────────────────────────────────
-    let astroScore = 50;
-    const astroFactors: string[] = [];
-
-    try {
-      const ruler = CRYPTO_RULERS[symbol] || 'Mercury';
-      const pos   = (astroData.planetaryPositions || []).find((p: any) => p.planet === ruler);
-      const bias  = PLANET_BIAS[ruler] || 0.5;
-
-      let rulerScore = bias * 100;
-      if (pos?.retrograde) {
-        rulerScore = 100 - rulerScore;
-        astroFactors.push(`${ruler} retrograde on ${horizon} horizon — ${symbol} may face turbulence`);
-      } else if (pos) {
-        astroFactors.push(`${ruler} (${symbol}'s ruler) in ${pos.sign} for ${horizon} period`);
-      }
-
-      // Hora influence
-      const hora = astroData.hora || '';
-      if (hora === ruler) {
-        rulerScore = Math.min(100, rulerScore + 15);
-        astroFactors.push(`${ruler} hora active — favorable for ${symbol}`);
-      }
-
-      astroScore = Math.round(Math.min(100, Math.max(0, rulerScore)));
-
-      // Lunar phase influence on crypto (crypto is highly Moon-sensitive)
-      if (astroData.lunarPhase === 'Full Moon') {
-        astroScore = Math.min(100, astroScore + 8);
-        astroFactors.push('Full Moon period — heightened crypto volatility expected');
-      } else if (astroData.lunarPhase === 'New Moon') {
-        astroFactors.push('New Moon phase — potential trend reversal period');
-      }
-    } catch { /* skip */ }
-
-    // ── Combine 55/45 ─────────────────────────────────────────────────────
-    const combinedScore = Math.round((statsScore * 0.55) + (astroScore * 0.45));
-    const signal: CryptoOutlook['signal'] = combinedScore > 60 ? 'bullish' : combinedScore < 40 ? 'bearish' : 'neutral';
-    const confidence = Math.round(35 + Math.abs(combinedScore - 50) * 0.9); // crypto lower confidence
-
-    const scoreBias     = (combinedScore - 50) / 50;
-    const changeEstimate = Math.round(scoreBias * cryptoBand * 100 * 100) / 100;
-    const rangeLow      = Math.round((changeEstimate - cryptoBand * 60) * 100) / 100;
-    const rangeHigh     = Math.round((changeEstimate + cryptoBand * 60) * 100) / 100;
-
-    const strength: CryptoOutlook['strength'] =
-      Math.abs(combinedScore - 50) > 20 ? 'strong' :
-      Math.abs(combinedScore - 50) > 10 ? 'moderate' : 'weak';
-
-    const allFactors = [...statsFactors, ...astroFactors].slice(0, 4);
-    const allRisks   = [...statsRisks, 'Crypto markets are highly volatile — use stop-loss'].slice(0, 3);
-
-    return {
-      symbol, name: CRYPTO_NAMES[symbol] || symbol, signal, strength,
-      confidence, changeEstimate, rangeLow, rangeHigh, currentPrice,
-      statsScore, astroScore,
-      keyFactors: allFactors.length > 0 ? allFactors : [`${symbol} analysis for ${horizon} horizon`],
-      risks: allRisks,
-      horizon, targetDate: targetDate.toISOString(),
-    };
-  }
-
-  // ── Market summary text ───────────────────────────────────────────────────
-  private buildMarketSummary(
-    horizon: string,
-    bullishSectors: SectorOutlook[], bearishSectors: SectorOutlook[],
-    bullishCrypto:  CryptoOutlook[],  bearishCrypto:  CryptoOutlook[],
-    astroData: any
-  ): string {
-    const topBullish = bullishSectors[0]?.sector;
-    const topBearish = bearishSectors[0]?.sector;
-    const topCrypto  = bullishCrypto[0]?.symbol;
-    const hora       = astroData.hora || 'Mercury';
-
-    let summary = `For the ${horizon} horizon: `;
-    if (topBullish) summary += `${topBullish} leads the bullish outlook. `;
-    if (topBearish) summary += `${topBearish} faces headwinds. `;
-    if (topCrypto)  summary += `In crypto, ${topCrypto} shows the strongest upside potential. `;
-    summary += `Planetary configuration at target date shows ${hora} hora influence, adding ${['Jupiter', 'Venus', 'Mercury'].includes(hora) ? 'positive' : 'cautionary'} energy.`;
-    return summary;
+  private summary(horizon: string, s: Bucket<SectorOutlook>, c: Bucket<CryptoOutlook>): string {
+    const up = s.topBullish.map(x => `${x.sector} (${x.changeEstimate > 0 ? '+' : ''}${x.changeEstimate}%)`).slice(0, 2).join(', ');
+    const dn = s.topBearish.map(x => `${x.sector} (${x.changeEstimate}%)`).slice(0, 2).join(', ');
+    const cu = c.topBullish[0], cd = c.topBearish[0];
+    const parts = [`For the ${horizon} horizon:`];
+    if (up) parts.push(`strongest sectors: ${up}.`);
+    if (dn) parts.push(`weakest sectors: ${dn}.`);
+    if (cu) parts.push(`Crypto leader: ${cu.symbol} (${cu.changeEstimate > 0 ? '+' : ''}${cu.changeEstimate}%).`);
+    if (cd) parts.push(`Crypto laggard: ${cd.symbol} (${cd.changeEstimate}%).`);
+    if (!up && !dn && !cu) parts.push('market data was unavailable right now — please refresh in a moment.');
+    return parts.join(' ');
   }
 }
 

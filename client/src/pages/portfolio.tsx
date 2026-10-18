@@ -9,6 +9,50 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TrendingUp, Eye, X, BarChart2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 
+function Stat({ label, value, tone }: { label: string; value: string | number; tone: string }) {
+  return (<div className="text-center p-4 rounded-lg bg-gray-50"><div className={`text-3xl font-bold ${tone}`}>{value}</div><p className="text-sm text-gray-600 mt-1">{label}</p></div>);
+}
+
+function PerformanceCard({ title, subtitle, p, showRecent }: { title: string; subtitle: string; p?: any; showRecent?: boolean }) {
+  const none = !p || p.scored === 0;
+  return (
+    <Card className="p-6" data-testid={`card-performance-${showRecent ? "mine" : "app"}`}>
+      <CardTitle className="mb-1">{title}</CardTitle>
+      <p className="text-xs text-gray-500 mb-4">{subtitle}</p>
+      {!p ? <p className="text-sm text-gray-500">Loading…</p> : none ? (
+        <p className="text-sm text-gray-600">No prediction has reached its target date yet{p.pending ? ` (${p.pending} still running)` : ""}. Results appear here automatically once the real price is known — nothing is estimated in the meantime.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat label="Correct" value={p.correct} tone="text-green-600" />
+            <Stat label="Wrong" value={p.wrong} tone="text-red-600" />
+            <Stat label="Accuracy" value={p.accuracyPct != null ? `${p.accuracyPct}%` : "—"} tone="text-blue-600" />
+            <Stat label="Still running" value={p.pending} tone="text-purple-600" />
+          </div>
+          <div className="mt-3 w-full h-2 bg-red-200 rounded-full overflow-hidden"><div className="h-2 bg-green-500" style={{ width: `${p.accuracyPct ?? 0}%` }} /></div>
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600">
+            <span>Stocks: {p.byMarket.stock.correct}/{p.byMarket.stock.scored} right{p.byMarket.stock.accuracyPct != null ? ` (${p.byMarket.stock.accuracyPct}%)` : ""}</span>
+            <span>Crypto: {p.byMarket.crypto.correct}/{p.byMarket.crypto.scored} right{p.byMarket.crypto.accuracyPct != null ? ` (${p.byMarket.crypto.accuracyPct}%)` : ""}</span>
+            <span>Price landed in predicted range: {p.rangeHitPct != null ? `${p.rangeHitPct}%` : "—"}</span>
+            <span>Statistics {p.statisticsAccuracyPct ?? "—"}% · Astrology {p.astrologyAccuracyPct ?? "—"}%</span>
+          </div>
+          {showRecent && p.recent?.length > 0 && (
+            <div className="mt-4 divide-y">
+              {p.recent.map((r: any, i: number) => (
+                <div key={i} className="py-2 flex items-center justify-between text-sm">
+                  <span className="font-medium">{r.symbol}</span>
+                  <span className="text-gray-500">said {r.predicted} · was {r.actual} ({r.changePct > 0 ? "+" : ""}{r.changePct}%)</span>
+                  <Badge variant={r.correct ? "default" : "destructive"}>{r.correct ? "Correct" : "Wrong"}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 export default function Portfolio() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
@@ -35,6 +79,12 @@ export default function Portfolio() {
     enabled: isAuthenticated,
   });
 
+  const { data: perf } = useQuery<any>({
+    queryKey: ["/api/predictions/performance"],
+    enabled: isAuthenticated,
+    staleTime: 60000,
+  });
+
   const removeFromWatchlist = useMutation({
     mutationFn: (stock: string) => apiRequest("DELETE", `/api/user/watchlist/${stock}`),
     onSuccess: () => {
@@ -46,15 +96,6 @@ export default function Portfolio() {
 
   // ── Real performance stats from actual predictions ────────────────────────
   const totalPredictions = allPredictions.length;
-
-  // Calculate accuracy: predictions where current price is within pred range
-  const completedPreds = allPredictions.filter((p: any) => p.currentPrice && p.predLow && p.predHigh);
-  const accuratePreds = completedPreds.filter((p: any) =>
-    p.currentPrice >= p.predLow && p.currentPrice <= p.predHigh
-  );
-  const accuracyRate = completedPreds.length > 0
-    ? ((accuratePreds.length / completedPreds.length) * 100).toFixed(1)
-    : null;
 
   // Best/worst from predictions
   const predsByStock = allPredictions.reduce((acc: any, p: any) => {
@@ -201,24 +242,8 @@ export default function Portfolio() {
             </Card>
           ) : (
             <>
-              {/* Real summary stats */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Card className="p-6 text-center">
-                  <div className="text-3xl font-bold text-purple-600 mb-2">{totalPredictions}</div>
-                  <p className="text-gray-600">Total Predictions</p>
-                </Card>
-                <Card className="p-6 text-center">
-                  <div className="text-3xl font-bold text-blue-600 mb-2">
-                    {accuracyRate ? `${accuracyRate}%` : "—"}
-                  </div>
-                  <p className="text-gray-600">Accuracy Rate</p>
-                  {!accuracyRate && <p className="text-xs text-gray-400 mt-1">Not enough data</p>}
-                </Card>
-                <Card className="p-6 text-center">
-                  <div className="text-3xl font-bold text-green-600 mb-2">{activePredictions.length}</div>
-                  <p className="text-gray-600">Active Predictions</p>
-                </Card>
-              </div>
+              <PerformanceCard title="BullWiser prediction performance" subtitle="All predictions made by the application and later checked against the real price" p={perf?.app} />
+              <PerformanceCard title="Your predictions" subtitle={`${totalPredictions} made · ${activePredictions.length} still running`} p={perf?.mine} showRecent />
 
               {/* Prediction breakdown */}
               <Card className="p-6">
