@@ -875,18 +875,30 @@ export class AdvancedAstrologyService {
     currentDate: Date,
     dashaDurations: Record<string, number>
   ): any {
-    // Complex dasha calculation logic
-    const daysSinceBirth = Math.floor((currentDate.getTime() - birthDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    // Simplified for demonstration
+    // Vimshottari: 120-year cycle. Each level splits its parent's span in proportion to the planet's years.
+    const order = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury'];
+    const DAY = 86400000, YEAR = 365.25 * DAY;
+    let cursor = birthDate.getTime();
+    let idx = Math.max(0, order.indexOf(startingDasha));
+    const target = currentDate.getTime();
+    // Walk the mahadashas from birth (starting at the beginning of the first one — birth-time Moon fraction not modelled)
+    while (cursor + dashaDurations[order[idx]] * YEAR <= target) { cursor += dashaDurations[order[idx]] * YEAR; idx = (idx + 1) % 9; }
+    const levels: string[] = [];
+    let start = cursor, span = dashaDurations[order[idx]] * YEAR, from = idx;
+    levels.push(order[idx]);
+    let lastStart = start, lastEnd = start + span;
+    for (let lvl = 0; lvl < 4; lvl++) {
+      let c = start, i = from;
+      for (let n = 0; n < 9; n++) {
+        const len = span * dashaDurations[order[i]] / 120;
+        if (c + len > target || n === 8) { levels.push(order[i]); start = c; span = len; from = i; break; }
+        c += len; i = (i + 1) % 9;
+      }
+      lastStart = start; lastEnd = start + span;
+    }
     return {
-      maha: startingDasha,
-      antar: 'Venus',
-      pratyantar: 'Sun',
-      sukshma: 'Moon',
-      prana: 'Mars',
-      startDate: currentDate,
-      endDate: new Date(currentDate.getTime() + 30 * 24 * 60 * 60 * 1000),
+      maha: levels[0], antar: levels[1], pratyantar: levels[2], sukshma: levels[3], prana: levels[4],
+      startDate: new Date(lastStart), endDate: new Date(lastEnd),
     };
   }
 

@@ -1003,15 +1003,15 @@ export function registerRoutes(app: Express): Server {
   });
 
   app.post('/api/notifications/subscribe', isAuthenticated, async (req: any, res) => {
-    res.json({ status: 'success', message: 'Subscription stored' });
+    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results are sent by email — manage them in Settings → Notifications.' });
   });
 
   app.post('/api/notifications/unsubscribe', isAuthenticated, async (req: any, res) => {
-    res.json({ status: 'success', message: 'Unsubscribed' });
+    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results are sent by email — manage them in Settings → Notifications.' });
   });
 
   app.post('/api/notifications/test', isAuthenticated, async (req: any, res) => {
-    res.json({ status: 'success', message: 'Test notification sent' });
+    res.status(501).json({ status: 'unavailable', message: 'Browser push notifications are not enabled. Prediction results are sent by email — manage them in Settings → Notifications.' });
   });
 
   const httpServer = createServer(app);

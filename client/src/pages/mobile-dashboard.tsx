@@ -60,7 +60,7 @@ export default function MobileDashboard() {
     <div className="min-h-screen bg-gray-50">
       <MobileHeader 
         onMenuClick={() => setShowNotificationSettings(!showNotificationSettings)}
-        notificationCount={3}
+        notificationCount={0}
       />
 
       <div className="main-content-mobile px-4 py-4">
