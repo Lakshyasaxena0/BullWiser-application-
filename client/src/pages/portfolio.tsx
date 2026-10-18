@@ -123,7 +123,7 @@ export default function Portfolio() {
       </div>
 
       <Tabs defaultValue="watchlist" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-3 h-auto">
           <TabsTrigger value="watchlist">Watchlist</TabsTrigger>
           <TabsTrigger value="active">Active Predictions</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>

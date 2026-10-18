@@ -277,11 +277,11 @@ export default function Predictions() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center space-x-4">
-        <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="flex items-center">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+        <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="hidden sm:flex items-center self-start">
           <ChevronLeft className="h-4 w-4 mr-1" />Back to Dashboard
         </Button>
-        <div className="border-l pl-4">
+        <div className="sm:border-l sm:pl-4">
           <h1 className="text-2xl font-bold text-gray-900">Predictions</h1>
           <p className="text-gray-600">Make AI-powered predictions for stocks and cryptocurrencies</p>
         </div>

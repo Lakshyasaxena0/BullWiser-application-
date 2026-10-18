@@ -206,7 +206,7 @@ export default function SettingsPage() {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="flex w-full justify-start overflow-x-auto [&>*]:shrink-0 md:grid md:grid-cols-5">
           <TabsTrigger value="profile"><User className="h-4 w-4 mr-1" />Profile</TabsTrigger>
           <TabsTrigger value="predictions"><Key className="h-4 w-4 mr-1" />Predictions</TabsTrigger>
           <TabsTrigger value="notifications"><Bell className="h-4 w-4 mr-1" />Notifications</TabsTrigger>

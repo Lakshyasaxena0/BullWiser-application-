@@ -7,7 +7,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect } from "react";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
-import MobileDashboard from "@/pages/mobile-dashboard";
 import Predictions from "@/pages/predictions";
 import Portfolio from "@/pages/portfolio";
 import Notifications from "@/pages/notifications";
@@ -17,6 +16,7 @@ import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
 import VerifyEmailPage from "@/pages/verify-email";
 import VerifyEmailBanner from "@/components/VerifyEmailBanner";
+import MobileLayout from "@/components/layout/mobile-layout";
 import SettingsPage from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 import Sidebar from "@/components/layout/sidebar";
@@ -39,10 +39,12 @@ function Router() {
   }, [isLoading]);
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    // Phones in portrait (narrow) AND in landscape (wide but short, touch screen) use the mobile layout
+    const checkMobile = () => setIsMobile(window.innerWidth < 768 || (navigator.maxTouchPoints > 0 && window.innerHeight < 520));
     checkMobile();
     window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
+    window.addEventListener("orientationchange", checkMobile);
+    return () => { window.removeEventListener("resize", checkMobile); window.removeEventListener("orientationchange", checkMobile); };
   }, []);
 
   // Password-reset pages work whether or not someone is logged in (the link comes from an email)
@@ -76,9 +78,10 @@ function Router() {
 
   if (isMobile) {
     return (
+      <MobileLayout>
       <Switch>
-        <Route path="/" component={MobileDashboard} />
-        <Route path="/dashboard" component={MobileDashboard} />
+        <Route path="/" component={Dashboard} />
+        <Route path="/dashboard" component={Dashboard} />
         <Route path="/predictions" component={Predictions} />
         <Route path="/portfolio" component={Portfolio} />
         <Route path="/subscription"><Redirect to="/plans" /></Route>
@@ -98,6 +101,7 @@ function Router() {
         <Route path="/auth" component={AuthPage} />
         <Route component={NotFound} />
       </Switch>
+      </MobileLayout>
     );
   }
 

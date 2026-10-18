@@ -23,7 +23,7 @@ import { useState, useEffect } from "react";
 import { BullWiserLogo } from "@/components/BullWiserLogo";
 
 // ★★★ CORRECTED NAVIGATION - Market Outlook + Analytics ★★★
-const navigation = [
+export const navigation = [
   { name: "Dashboard",       href: "/",                    icon: LayoutDashboard },
   { name: "Watchlist",       href: "/portfolio",           icon: Briefcase },
   { name: "Notifications",   href: "/notifications",       icon: Bell },
