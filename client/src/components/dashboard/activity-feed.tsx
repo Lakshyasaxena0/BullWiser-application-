@@ -32,7 +32,7 @@ export default function ActivityFeed() {
         icon: isCrypto ? Bitcoin : TrendingUp,
         iconColor: isCrypto ? 'bg-orange-500' : 'bg-blue-500',
         title: `${isCrypto ? 'Crypto' : 'Stock'} prediction — ${symbol}`,
-        description: `Target: ₹${p.predLow?.toFixed(2)} – ₹${p.predHigh?.toFixed(2)} · Confidence: ${p.confidence?.toFixed(1)}%`,
+        description: `Target: ${isCrypto ? '$' : '₹'}${p.predLow?.toFixed(2)} – ${isCrypto ? '$' : '₹'}${p.predHigh?.toFixed(2)} · Confidence: ${p.confidence?.toFixed(1)}%`,
         sortTime: p.createdAt ? new Date(p.createdAt).getTime() : 0,
         time: p.createdAt ? formatDistanceToNow(new Date(p.createdAt), { addSuffix: true }) : 'recently',
       });

@@ -35,6 +35,13 @@ import { isGroqConfigured } from "./groqClient";
 // ── Request-validation helpers ───────────────────────────────────────────────
 
 /** Parse the optional `when` field. Returns a valid Date, or null if it can't be parsed. */
+
+/** Training endpoints change the shared model every user's predictions learn from — only staff may use them. */
+const requireStaff = (req: any, res: any, next: any) => {
+  if (req.user?.role === 'admin' || req.user?.role === 'developer') return next();
+  res.status(403).json({ message: 'Only the BullWiser team can change the shared training data.' });
+};
+
 const MAX_AHEAD_DAYS = 365 * 3;
 function parseWhen(when: unknown): Date | null {
   if (!when || when === 'now') return new Date();
@@ -301,6 +308,11 @@ export function registerRoutes(app: Express): Server {
       if (!charge) return;
       req._charge = charge;
       const historicalData = await stockDataService.getHistoricalData(upperSymbol, LONG_TERM_DAYS);
+      if (!historicalData || historicalData.length < 30) {
+        // Without real price history the statistics half would be empty and the range a made-up percentage: refuse instead
+        await refundCharge(req, req._charge, 'no price history');
+        return res.status(503).json({ message: `Price history for "${upperSymbol}" could not be loaded right now, so no prediction was made. Your credits were not used. Please try again shortly.`, error: 'HISTORY_UNAVAILABLE', symbol: upperSymbol });
+      }
       
       // ★ Calculate time-based risk multiplier
       const riskMultiplier = getTimeScaledRiskMultiplier(whenDate, req.body.riskLevel || 'medium', true);
@@ -398,6 +410,10 @@ export function registerRoutes(app: Express): Server {
       const riskMultiplier = getTimeScaledRiskMultiplier(whenDate, riskLevel, false);
       
       const historicalData = await cryptoDataService.getCryptoHistoricalData(cryptoSymbol.toUpperCase(), 30);
+      if (!historicalData || historicalData.length < 7) {
+        await refundCharge(req, req._charge, 'no price history');
+        return res.status(503).json({ message: `Price history for ${cryptoSymbol.toUpperCase()} could not be loaded right now, so no prediction was made. Your credits were not used. Please try again shortly.`, error: 'HISTORY_UNAVAILABLE' });
+      }
       const enhancedPrediction = await aiService.generateEnhancedCryptoPrediction(cryptoSymbol.toUpperCase(), currentPrice, userId, historicalData, cryptoQuote, whenDate);
       
       // ★ Apply time scaling to crypto predictions
@@ -826,7 +842,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  app.post('/api/training/record-case', isAuthenticated, async (req: any, res) => {
+  app.post('/api/training/record-case', isAuthenticated, requireStaff, async (req: any, res) => {
     try {
       const { stockSymbol, sector, predictionDate, actualOutcome } = req.body;
       res.json(await aiAstrologyTrainer.trainOnRealWorldCase(stockSymbol, sector, new Date(predictionDate), { direction: actualOutcome.direction, actualReturn: actualOutcome.actualReturn, timeToTarget: actualOutcome.timeToTarget || 1 }));
@@ -838,7 +854,7 @@ export function registerRoutes(app: Express): Server {
   // Model-training endpoints spawn Python processes, so they require a login and a safe model name.
   const SAFE_MODEL_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 
-  app.post('/api/training/train-model', isAuthenticated, async (req: any, res) => {
+  app.post('/api/training/train-model', isAuthenticated, requireStaff, async (req: any, res) => {
     try {
       const { trainingCases, modelName, modelType } = req.body;
       if (!trainingCases || !Array.isArray(trainingCases)) return res.status(400).json({ error: "Training cases array required" });
@@ -869,7 +885,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  app.post('/api/training/batch-train', isAuthenticated, async (req: any, res) => {
+  app.post('/api/training/batch-train', isAuthenticated, requireStaff, async (req: any, res) => {
     try {
       const cases = req.body.trainingCases.map((c: any) => ({ ...c, date: new Date(c.date) }));
       res.json(await aiAstrologyTrainer.batchTrainOnHistoricalData(cases, (p) => console.log(`Training: ${p}%`)));

@@ -253,9 +253,9 @@ export default function Predictions() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-3 gap-2 text-sm text-center">
-            <div><p className="text-gray-500">{isPast ? "Initial" : "Current"}</p><p className="font-semibold">₹{prediction.currentPrice?.toFixed(2)}</p></div>
-            <div><p className="text-gray-500">Pred. Low</p><p className="font-semibold text-red-600">₹{prediction.predLow?.toFixed(2)}</p></div>
-            <div><p className="text-gray-500">Pred. High</p><p className="font-semibold text-green-600">₹{prediction.predHigh?.toFixed(2)}</p></div>
+            <div><p className="text-gray-500">{isPast ? "Initial" : "Current"}</p><p className="font-semibold">{String(prediction.stock).startsWith("CRYPTO_") ? "$" : "₹"}{prediction.currentPrice?.toFixed(2)}</p></div>
+            <div><p className="text-gray-500">Pred. Low</p><p className="font-semibold text-red-600">{String(prediction.stock).startsWith("CRYPTO_") ? "$" : "₹"}{prediction.predLow?.toFixed(2)}</p></div>
+            <div><p className="text-gray-500">Pred. High</p><p className="font-semibold text-green-600">{String(prediction.stock).startsWith("CRYPTO_") ? "$" : "₹"}{prediction.predHigh?.toFixed(2)}</p></div>
           </div>
           <div className="flex items-center justify-between text-sm text-gray-500">
             <div className="flex items-center"><Clock className="h-4 w-4 mr-1" />{new Date(prediction.createdAt).toLocaleDateString("en-IN")}</div>
@@ -436,16 +436,16 @@ export default function Predictions() {
                         <div className="grid grid-cols-3 gap-2">
                           <div className="bg-gray-50 rounded-lg p-3 text-center">
                             <p className="text-xs text-gray-500 mb-1">Current Price</p>
-                            <p className="font-bold text-gray-900 text-lg">₹{predResult.currentPrice?.toFixed(2)}</p>
+                            <p className="font-bold text-gray-900 text-lg">{predResult.crypto ? "$" : "₹"}{predResult.currentPrice?.toFixed(2)}</p>
                           </div>
                           <div className="bg-red-50 rounded-lg p-3 text-center">
                             <p className="text-xs text-gray-500 mb-1">Target Low</p>
-                            <p className="font-bold text-red-600 text-lg">₹{predResult.predLow?.toFixed(2)}</p>
+                            <p className="font-bold text-red-600 text-lg">{predResult.crypto ? "$" : "₹"}{predResult.predLow?.toFixed(2)}</p>
                             {metrics && <p className="text-xs text-red-400 mt-0.5">-{metrics.downside}%</p>}
                           </div>
                           <div className="bg-green-50 rounded-lg p-3 text-center">
                             <p className="text-xs text-gray-500 mb-1">Target High</p>
-                            <p className="font-bold text-green-600 text-lg">₹{predResult.predHigh?.toFixed(2)}</p>
+                            <p className="font-bold text-green-600 text-lg">{predResult.crypto ? "$" : "₹"}{predResult.predHigh?.toFixed(2)}</p>
                             {metrics && <p className="text-xs text-green-500 mt-0.5">+{metrics.upside}%</p>}
                           </div>
                         </div>
@@ -455,11 +455,11 @@ export default function Predictions() {
                           <div className="grid grid-cols-3 gap-2 text-center">
                             <div className="bg-blue-50 rounded-lg p-2.5">
                               <p className="text-xs text-gray-500">Price Range</p>
-                              <p className="font-semibold text-blue-700 text-sm">₹{metrics.range}</p>
+                              <p className="font-semibold text-blue-700 text-sm">{predResult.crypto ? "$" : "₹"}{metrics.range}</p>
                             </div>
                             <div className="bg-purple-50 rounded-lg p-2.5">
                               <p className="text-xs text-gray-500">Mid Target</p>
-                              <p className="font-semibold text-purple-700 text-sm">₹{metrics.mid}</p>
+                              <p className="font-semibold text-purple-700 text-sm">{predResult.crypto ? "$" : "₹"}{metrics.mid}</p>
                             </div>
                             <div className={`rounded-lg p-2.5 ${predResult.direction === "bearish" ? "bg-red-50" : "bg-green-50"}`}>
                               <p className="text-xs text-gray-500">Expected Move</p>

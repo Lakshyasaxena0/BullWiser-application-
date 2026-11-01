@@ -77,9 +77,9 @@ export default function TradingHistoryPage() {
                     <span>{symbol}</span>
                   </div>
                 </TableCell>
-                <TableCell>₹{p.currentPrice?.toFixed(2) ?? '—'}</TableCell>
-                <TableCell className="text-red-600">₹{p.predLow?.toFixed(2) ?? '—'}</TableCell>
-                <TableCell className="text-green-600">₹{p.predHigh?.toFixed(2) ?? '—'}</TableCell>
+                <TableCell>{(p.stock||"").startsWith("CRYPTO_")?"$":"₹"}{p.currentPrice?.toFixed(2) ?? '—'}</TableCell>
+                <TableCell className="text-red-600">{(p.stock||"").startsWith("CRYPTO_")?"$":"₹"}{p.predLow?.toFixed(2) ?? '—'}</TableCell>
+                <TableCell className="text-green-600">{(p.stock||"").startsWith("CRYPTO_")?"$":"₹"}{p.predHigh?.toFixed(2) ?? '—'}</TableCell>
                 <TableCell className={getConfidenceColor(p.confidence)}>
                   {p.confidence?.toFixed(1)}%
                 </TableCell>

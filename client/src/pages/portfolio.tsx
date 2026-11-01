@@ -191,15 +191,15 @@ export default function Portfolio() {
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div className="text-center">
                           <p className="text-gray-500">Current</p>
-                          <p className="font-semibold">₹{Number(p.currentPrice).toFixed(2)}</p>
+                          <p className="font-semibold">{isCrypto ? "$" : "₹"}{Number(p.currentPrice).toFixed(2)}</p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-500">Low</p>
-                          <p className="font-semibold text-red-600">₹{Number(p.predLow).toFixed(2)}</p>
+                          <p className="font-semibold text-red-600">{isCrypto ? "$" : "₹"}{Number(p.predLow).toFixed(2)}</p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-500">High</p>
-                          <p className="font-semibold text-green-600">₹{Number(p.predHigh).toFixed(2)}</p>
+                          <p className="font-semibold text-green-600">{isCrypto ? "$" : "₹"}{Number(p.predHigh).toFixed(2)}</p>
                         </div>
                       </div>
                       <div className="flex items-center justify-between">
@@ -263,7 +263,7 @@ export default function Portfolio() {
                           <div className="text-right">
                             <div className="text-sm font-medium text-blue-600">{avgConfidence}% avg confidence</div>
                             <div className="text-xs text-gray-400">
-                              Last: ₹{Number(latest.predLow).toFixed(0)}–₹{Number(latest.predHigh).toFixed(0)}
+                              Last: {String(latest.stock).startsWith('CRYPTO_') ? '$' : '₹'}{Number(latest.predLow).toFixed(0)}–{String(latest.stock).startsWith('CRYPTO_') ? '$' : '₹'}{Number(latest.predHigh).toFixed(0)}
                             </div>
                           </div>
                         </div>

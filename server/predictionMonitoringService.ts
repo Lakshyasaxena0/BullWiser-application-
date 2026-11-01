@@ -92,12 +92,30 @@ export class PredictionMonitoringService {
       // Never let one slow data provider stall the whole run
       const withTimeout = <T>(p: Promise<T>) =>
         Promise.race([p, new Promise<null>(r => setTimeout(() => r(null), 15_000))]);
-      if (isCrypto) {
-        const quote: any = await withTimeout(cryptoDataService.getCryptoQuote(symbol));
-        actualPrice = quote?.lastPrice || null;
-      } else {
-        const quote: any = await withTimeout(stockDataService.getStockQuote(symbol, 'NSE'));
-        actualPrice = quote?.lastPrice || null;
+      // The result must be the price AT the target date. When this check runs late (the free server sleeps,
+      // the price feed was down) the live price is no longer that, so use the close of the target day instead.
+      const lateByMs = Date.now() - new Date(prediction.targetDate).getTime();
+      if (lateByMs > 36 * 3600_000) {
+        try {
+          const ageDays = Math.ceil(lateByMs / 86400_000);
+          const bars: any[] = isCrypto
+            ? await withTimeout(cryptoDataService.getCryptoHistoricalData(symbol, Math.min(90, ageDays + 7))) as any[] ?? []
+            : await withTimeout(stockDataService.getHistoricalData(symbol, Math.min(1500, ageDays + 10))) as any[] ?? [];
+          const endOfTargetDay = new Date(prediction.targetDate).getTime() + 86400_000 - 1;
+          const upTo = (bars || []).filter((b: any) => new Date(b.date).getTime() <= endOfTargetDay && Number(b.close) > 0);
+          const last = upTo[upTo.length - 1];
+          // accept the bar only if it is within 5 days of the target (holidays/weekends) — otherwise the data does not cover it
+          if (last && endOfTargetDay - new Date(last.date).getTime() < 5 * 86400_000) actualPrice = Number(last.close);
+        } catch { /* fall through to the live price */ }
+      }
+      if (!actualPrice) {
+        if (isCrypto) {
+          const quote: any = await withTimeout(cryptoDataService.getCryptoQuote(symbol));
+          actualPrice = quote?.lastPrice || null;
+        } else {
+          const quote: any = await withTimeout(stockDataService.getStockQuote(symbol, 'NSE'));
+          actualPrice = quote?.lastPrice || null;
+        }
       }
 
       if (!actualPrice) {

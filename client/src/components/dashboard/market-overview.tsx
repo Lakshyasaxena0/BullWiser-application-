@@ -6,93 +6,45 @@ interface MarketOverviewProps {
   marketData?: any;
 }
 
+const formatPercent = (val: number) => `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+const formatValue = (val: number) => val.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+// A row shows a number only when the live feed really delivered one; otherwise "—" (never a made-up 0.00%)
+function IndexRow({ label, idx, id }: { label: string; idx?: { value?: number; changePercent?: number }; id: string }) {
+  const has = !!idx && Number(idx.value) > 0;
+  const pct = Number(idx?.changePercent) || 0;
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-gray-600">{label}</span>
+      <div className="text-right flex items-center space-x-2">
+        <span className="font-semibold text-gray-900" data-testid={`text-${id}-value`}>{has ? formatValue(Number(idx!.value)) : "—"}</span>
+        {has && (
+          <Badge className={`${pct >= 0 ? "text-green-600" : "text-red-600"} bg-transparent border-0 p-0 text-sm`} data-testid={`badge-${id}-change`}>
+            {pct >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+            {formatPercent(pct)}
+          </Badge>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function MarketOverview({ marketData }: MarketOverviewProps) {
-  const indices = marketData?.indices || {
-    nifty50:   { value: 0, change: 0, changePercent: 0 },
-    sensex:    { value: 0, change: 0, changePercent: 0 },
-    bankNifty: { value: 0, change: 0, changePercent: 0 },
-  };
-
-
-  const getChangeColor = (change: number) =>
-    change >= 0 ? "text-green-600" : "text-red-600";
-
-  const getChangeIcon = (change: number) =>
-    change >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />;
-
-  const formatPercent = (val: number) => {
-    const fixed = val.toFixed(2);
-    return val > 0 ? `+${fixed}%` : `${fixed}%`;
-  };
-
-  const formatValue = (val: number) => {
-    if (!val) return '—';
-    return val.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-  };
-
+  const indices = marketData?.indices || {};
+  const anyLive = ["nifty50", "sensex", "bankNifty"].some((k) => Number(indices[k]?.value) > 0);
   return (
     <div className="space-y-6">
-      {/* Market Summary */}
       <Card className="shadow-sm border border-gray-200">
         <CardHeader>
-          <CardTitle className="text-lg font-semibold" data-testid="text-market-overview-title">
-            Market Overview
-          </CardTitle>
+          <CardTitle className="text-lg font-semibold" data-testid="text-market-overview-title">Market Overview</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* NIFTY 50 */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">NIFTY 50</span>
-            <div className="text-right flex items-center space-x-2">
-              <span className="font-semibold text-gray-900" data-testid="text-nifty-value">
-                {formatValue(indices.nifty50.value)}
-              </span>
-              <Badge
-                className={`${getChangeColor(indices.nifty50.changePercent)} bg-transparent border-0 p-0 text-sm`}
-                data-testid="badge-nifty-change"
-              >
-                {getChangeIcon(indices.nifty50.changePercent)}
-                {formatPercent(indices.nifty50.changePercent)}
-              </Badge>
-            </div>
-          </div>
-
-          {/* SENSEX */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">SENSEX</span>
-            <div className="text-right flex items-center space-x-2">
-              <span className="font-semibold text-gray-900" data-testid="text-sensex-value">
-                {formatValue(indices.sensex.value)}
-              </span>
-              <Badge
-                className={`${getChangeColor(indices.sensex.changePercent)} bg-transparent border-0 p-0 text-sm`}
-                data-testid="badge-sensex-change"
-              >
-                {getChangeIcon(indices.sensex.changePercent)}
-                {formatPercent(indices.sensex.changePercent)}
-              </Badge>
-            </div>
-          </div>
-
-          {/* Bank NIFTY */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600">Bank NIFTY</span>
-            <div className="text-right flex items-center space-x-2">
-              <span className="font-semibold text-gray-900" data-testid="text-bank-nifty-value">
-                {formatValue(indices.bankNifty.value)}
-              </span>
-              <Badge
-                className={`${getChangeColor(indices.bankNifty.changePercent)} bg-transparent border-0 p-0 text-sm`}
-                data-testid="badge-bank-nifty-change"
-              >
-                {getChangeIcon(indices.bankNifty.changePercent)}
-                {formatPercent(indices.bankNifty.changePercent)}
-              </Badge>
-            </div>
-          </div>
+          <IndexRow label="NIFTY 50" idx={indices.nifty50} id="nifty" />
+          <IndexRow label="SENSEX" idx={indices.sensex} id="sensex" />
+          <IndexRow label="Bank NIFTY" idx={indices.bankNifty} id="bank-nifty" />
+          {!anyLive && <p className="text-xs text-gray-400">Live index data is not available right now.</p>}
         </CardContent>
       </Card>
-
     </div>
   );
 }
