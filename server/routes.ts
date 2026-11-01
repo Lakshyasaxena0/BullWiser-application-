@@ -13,6 +13,7 @@ import { registerPerformanceRoutes, summarizePerformance } from "./performance";
 import { registerCreditRoutes, chargeOrReject, refundCharge, quotePrediction, getUserPrefs } from "./credits";
 import { registerUserSettingsRoutes } from "./userSettings";
 import { registerEmailVerificationRoutes } from "./emailVerification";
+import { guardPrediction } from "./predictionGuard";
 import { enterRequestOptions } from "./requestOptions";
 import { outlookCost } from "./creditPricing";
 import { insertSubscriptionSchema, insertFeedbackSchema, insertPredictionSchema, insertWatchlistSchema } from "@shared/schema";
@@ -41,6 +42,13 @@ const requireStaff = (req: any, res: any, next: any) => {
   if (req.user?.role === 'admin' || req.user?.role === 'developer') return next();
   res.status(403).json({ message: 'Only the BullWiser team can change the shared training data.' });
 };
+
+/** Keep the stored learning snapshot identical to what the user was shown (the guard may have lowered confidence / downgraded the call). */
+function syncSnapshot(snapshot: any, direction: string, confidence: number): any {
+  if (!snapshot) return snapshot;
+  try { const o = typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot; o.finalDirection = direction; o.confidence = Math.round(confidence); return typeof snapshot === 'string' ? JSON.stringify(o) : o; }
+  catch { return snapshot; }
+}
 
 const MAX_AHEAD_DAYS = 365 * 3;
 function parseWhen(when: unknown): Date | null {
@@ -371,6 +379,17 @@ export function registerRoutes(app: Express): Server {
       const isDevMode = process.env.NODE_ENV === 'development';
       const showAstroDetails = isDevMode && req.user?.role === 'developer';
       const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, marketState: (realTimeQuote as any).marketState || null, priceAsOf: new Date().toISOString(), direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
+      {
+        const g = guardPrediction({ currentPrice, low: finalPrediction.predLow, high: finalPrediction.predHigh, confidence: finalPrediction.confidence, direction: String(finalPrediction.direction), daysAhead: Math.max(1, Math.ceil((whenDate.getTime() - Date.now()) / 86400000)), crypto: false });
+        if (!g.ok) {
+          console.error(`[Guard] ${upperSymbol} rejected: ${g.reason}`);
+          await refundCharge(req, req._charge, 'prediction failed quality check');
+          return res.status(503).json({ message: `A reliable prediction for "${upperSymbol}" could not be produced right now, so none was made. Your credits were not used. Please try again later.`, error: 'QUALITY_CHECK_FAILED', symbol: upperSymbol });
+        }
+        finalPrediction.confidence = g.confidence; (finalPrediction as any).direction = g.direction;
+        if (g.notes.length) (finalPrediction as any).keyRisks = [...((finalPrediction as any).keyRisks || []), ...g.notes];
+        enhancedPrediction.learningSnapshot = syncSnapshot(enhancedPrediction.learningSnapshot, g.direction, g.confidence);
+      }
       
       const statisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Standard technical analysis applied';
       const astroReasoning = enhancedPrediction.astroRecommendation || (enhancedPrediction.warnings?.length > 0 ? enhancedPrediction.warnings.join('; ') : null);
@@ -429,6 +448,17 @@ export function registerRoutes(app: Express): Server {
       }
       
       const finalPrediction = { crypto: cryptoSymbol.toUpperCase(), name: cryptoQuote.name, when: whenDate.toISOString(), currentPrice, predLow, predHigh, confidence: enhancedPrediction.combinedConfidence || 65, direction: enhancedPrediction.finalDirection || 'neutral', volatility: 'high', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based crypto analysis', marketCap: cryptoQuote.marketCap, volume24h: cryptoQuote.volume24h, change24h: cryptoQuote.changePercent24h, aiPowered: enhancedPrediction.metadata?.aiEnabled || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, vedic: enhancedPrediction.vedic || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, livePriceAvailable: currentPrice > 0 };
+      {
+        const g = guardPrediction({ currentPrice, low: finalPrediction.predLow, high: finalPrediction.predHigh, confidence: finalPrediction.confidence, direction: String(finalPrediction.direction), daysAhead: Math.max(1, Math.ceil((whenDate.getTime() - Date.now()) / 86400000)), crypto: true });
+        if (!g.ok) {
+          console.error(`[Guard] ${cryptoSymbol} rejected: ${g.reason}`);
+          await refundCharge(req, req._charge, 'prediction failed quality check');
+          return res.status(503).json({ message: `A reliable prediction for ${cryptoSymbol.toUpperCase()} could not be produced right now, so none was made. Your credits were not used. Please try again later.`, error: 'QUALITY_CHECK_FAILED' });
+        }
+        finalPrediction.confidence = g.confidence; (finalPrediction as any).direction = g.direction;
+        if (g.notes.length) (finalPrediction as any).keyRisks = [...((finalPrediction as any).keyRisks || []), ...g.notes];
+        enhancedPrediction.learningSnapshot = syncSnapshot(enhancedPrediction.learningSnapshot, g.direction, g.confidence);
+      }
       
       const cryptoStatisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Crypto technical analysis with volatility adjustment';
       const cryptoAstroReasoning = enhancedPrediction.astroRecommendation || null;

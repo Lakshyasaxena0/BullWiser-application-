@@ -29,12 +29,11 @@ export default function PlansPage() {
   const [buying, setBuying] = useState<number | null>(null);
 
   // cost calculator
-  const [calc, setCalc] = useState({ kind: "stock", sector: "auto", symbol: "", riskLevel: "medium", days: "30", customDate: "" });
+  const [calc, setCalc] = useState({ kind: "stock", sector: "auto", symbol: "", riskLevel: "medium", days: "30" });
 
   const { data } = useQuery<CreditsInfo>({ queryKey: ["/api/credits/me"] });
 
   const whenIso = () => {
-    if (calc.days === "custom") { const d = calc.customDate ? new Date(calc.customDate) : null; return d && !isNaN(d.getTime()) ? d.toISOString() : null; }
     return new Date(Date.now() + Number(calc.days) * 86400000).toISOString();
   };
   const when = whenIso();
@@ -132,7 +131,7 @@ export default function PlansPage() {
         <CardHeader>
           <CardTitle>How many credits will a prediction use?</CardTitle>
           <CardDescription>
-            The cost depends on which engines are on (statistics 4, astrology 4, AI 4), the risk level, how far ahead the date is (including a custom date), the sector's return level, the stock's recent performance and how big the possible move is.
+            The cost depends on which engines are on (statistics 4, astrology 4, AI 4), the risk level, how far ahead the date is, the sector's return level, the stock's recent performance and how big the possible move is.
             You always see the exact cost before you press Predict.
           </CardDescription>
         </CardHeader>
@@ -154,13 +153,8 @@ export default function PlansPage() {
                 <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem></SelectContent></Select></div>
             <div className="space-y-1"><Label>Looks ahead</Label>
               <Select value={calc.days} onValueChange={(v) => setCalc({ ...calc, days: v })}><SelectTrigger data-testid="select-calc-days"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="1">1 day</SelectItem><SelectItem value="7">1 week</SelectItem><SelectItem value="30">1 month</SelectItem><SelectItem value="90">3 months</SelectItem><SelectItem value="180">6 months</SelectItem><SelectItem value="365">1 year</SelectItem><SelectItem value="custom">Custom date &amp; time</SelectItem></SelectContent></Select></div>
-            {calc.days === "custom" && (
-              <div className="space-y-1"><Label>Target date &amp; time</Label>
-                <Input type="datetime-local" min={new Date().toISOString().slice(0, 16)} value={calc.customDate} onChange={(e) => setCalc({ ...calc, customDate: e.target.value })} data-testid="input-calc-custom-date" /></div>
-            )}
+                <SelectContent><SelectItem value="1">1 day</SelectItem><SelectItem value="7">1 week</SelectItem><SelectItem value="30">1 month</SelectItem><SelectItem value="90">3 months</SelectItem><SelectItem value="180">6 months</SelectItem><SelectItem value="365">1 year</SelectItem></SelectContent></Select></div>
           </div>
-          {calc.days === "custom" && !when && <p className="text-sm text-gray-500">Pick a future date and time to see the cost.</p>}
           {!calc.symbol.trim() && <p className="text-xs text-gray-500">Enter a stock/coin symbol to include its recent performance and benefit potential; without one those two items count at their minimum.</p>}
           {quote && when && (
             <div className="rounded-lg bg-gray-50 border p-4" data-testid="cost-breakdown">

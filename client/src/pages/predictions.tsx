@@ -34,7 +34,6 @@ export default function Predictions() {
 
   const [predType, setPredType] = useState<"stock" | "crypto">("stock");
   const [symbol, setSymbol] = useState("");
-  const [targetDate, setTargetDate] = useState("");
   const [horizon, setHorizon] = useState("1w");
   const [mode, setMode] = useState("suggestion");
   const [riskLevel, setRiskLevel] = useState("medium");
@@ -80,7 +79,6 @@ export default function Predictions() {
   });
 
   const getTargetDateFromHorizon = () => {
-    if (targetDate) return targetDate;
     const d = new Date();
     if (horizon === "1d") d.setDate(d.getDate() + 1);
     else if (horizon === "1w") d.setDate(d.getDate() + 7);
@@ -185,7 +183,6 @@ export default function Predictions() {
 
   // ★ Get human-readable horizon text
   const getHorizonText = () => {
-    if (horizon === "custom") return new Date(targetDate).toLocaleDateString("en-IN");
     if (horizon === "1d") return "tomorrow";
     if (horizon === "1w") return "next week";
     if (horizon === "1m") return "next month";
@@ -354,12 +351,8 @@ export default function Predictions() {
                       <SelectItem value="3m">3 Months</SelectItem>
                       <SelectItem value="6m">6 Months</SelectItem>
                       <SelectItem value="1y">1 Year</SelectItem>
-                      <SelectItem value="custom">Custom Date</SelectItem>
                     </SelectContent>
                   </Select>
-                  {horizon === "custom" && (
-                    <Input type="datetime-local" value={targetDate} onChange={e => { setTargetDate(e.target.value); setPredResult(null); }} min={new Date().toISOString().slice(0, 16)} />
-                  )}
                 </div>
 
                 <div className="space-y-2">
