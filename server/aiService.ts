@@ -10,7 +10,7 @@ import { learningService, type LearningProfile } from './learningService';
 import { stockDataService }          from './stockDataService';
 import { feedbackLearningService, NEUTRAL_LEARNING_ADJUSTMENT } from './feedbackLearningService';
 import { astrologyService }          from './astrologyService';
-import { longTermStatsService, LongTermStats, LONG_TERM_DAYS } from './longTermStatsService';
+import { longTermStatsService, LongTermStats, LONG_TERM_DAYS, horizonLtWeight } from './longTermStatsService';
 import { getMarketContext } from './marketContextService';
 import { getRequestOptions } from './requestOptions';
 import { advancedAstrologyService }  from './advancedAstrologyService';
@@ -70,6 +70,8 @@ interface SynthesisInput {
   currentPrice: number;
   targetDate:   Date;
   maxConfidence: number;
+  /** Broad market backdrop (Nifty trend, relative strength, India VIX) — stocks only. */
+  market?: any;
   /** Statistical side: indicators + (optional) the AI's own reading of them. */
   stats: {
     signal:     Direction;
@@ -161,6 +163,8 @@ Study BOTH, decide how much weight each deserves, say where they agree or confli
 Rules:
 - Use only the data provided. Never invent prices, news or indicators.
 - The LEARNED TRACK RECORD below says how reliable each source has actually been on past, scored predictions. Use its weighting as your starting point (stay within ~10 points of it). With no track record, use the house ratio 55% statistics / 45% astrology (stay within ~5 points). Shift further only if one side is neutral or missing, and reflect that in the weighting numbers.
+- Match the evidence to the horizon: for 1-7 days lean on the short-term indicators (RSI, MACD, moving averages, support/resistance); for 1 month or more lean on the 20-year analog forecast, seasonality and the long-run profile. Astrology is a timing/sentiment layer, not a price model.
+- Respect the market backdrop: a falling Nifty or high India VIX lowers confidence in bullish calls; a stock far weaker than the Nifty is a warning even when indicators look fine.
 - If a source has a poor track record, say so and lean on the other one.
 - If the two sides disagree, say so plainly and lower confidence instead of hiding the conflict.
 - Use hedged language ("suggests", "leans"). Never promise returns. This is analysis, not financial advice.
@@ -170,6 +174,9 @@ Respond with valid JSON only.`;
     const userPrompt = `Asset: ${input.symbol} (${input.assetType}, sector: ${input.sector})
 Current price: ${input.currentPrice}
 Prediction target date: ${input.targetDate.toISOString().slice(0, 10)} (${horizonDays} day${horizonDays === 1 ? '' : 's'} ahead)
+
+MARKET BACKDROP:
+${JSON.stringify(input.market ?? 'not available')}
 
 STATISTICAL ANALYSIS:
 ${JSON.stringify(input.stats ?? 'not available (not enough price history)')}
@@ -257,14 +264,15 @@ Return JSON:
     const sector = getSector(symbol);
 
     // ── Step 1: Feedback learning ─────────────────────────────────────────
-    let learningAdjustment = await feedbackLearningService
-      .getLearningAdjustments(symbol, userId || '')
-      .catch(() => ({ ...NEUTRAL_LEARNING_ADJUSTMENT }));
+    const useAstro = getRequestOptions().useAstro;           // Settings → astrology on/off
+    const [learningAdjustment0, profile0] = await Promise.all([
+      feedbackLearningService.getLearningAdjustments(symbol, userId || '').catch(() => ({ ...NEUTRAL_LEARNING_ADJUSTMENT })),
+      learningService.getProfile(symbol, sector, 'stock'),
+    ]);
+    let learningAdjustment = learningAdjustment0;
 
     // Learned track record (all users, all scored outcomes): decides the statistics-vs-astrology
     // weighting and corrects over/under-confidence.
-    const useAstro = getRequestOptions().useAstro;           // Settings → astrology on/off
-    const profile0 = await learningService.getProfile(symbol, sector, 'stock');
     const profile = useAstro ? profile0 : { ...profile0, weights: { statistical: 100, astrological: 0 } };
     if (profile.hasData) learningAdjustment = { ...learningAdjustment, confidenceAdjustment: profile.confidenceAdjustment };
     console.log(`[Learning] ${symbol}: weights ${profile.weights.statistical}/${profile.weights.astrological}, outcomes=${profile.samples.global}, confAdj=${profile.confidenceAdjustment}`);
@@ -274,6 +282,7 @@ Return JSON:
     let longTermStats: LongTermStats | null = null;
     let shortSignal: Direction | null = null;
     let marketContext: Awaited<ReturnType<typeof getMarketContext>> = null;
+    const runStats = async () => {
     try {
       const allBars = statisticalAnalysisService.normalizeYahooData(historicalData || []);
       const bars = allBars.slice(-500); // indicators (RSI/MACD/BB/S-R) look at the last ~2 years
@@ -284,7 +293,7 @@ Return JSON:
         // 20-year layer: long-run profile, seasonality, analog forward returns, walk-forward backtest
         longTermStats = longTermStatsService.analyze(symbol, allBars, targetDate);
         if (longTermStats && statsResult && longTermStats.reliable) {
-          const wLT = Math.max(0.25, Math.min(0.7, longTermStats.blendWeight + (profile.ltShift ?? 0)));
+          const wLT = horizonLtWeight(longTermStats.blendWeight + (profile.ltShift ?? 0), (targetDate.getTime() - Date.now()) / 86400000);
           const blended = Math.round(statsResult.statisticalScore * (1 - wLT) + longTermStats.score * wLT);
           statsResult.statisticalScore = blended;
           statsResult.statisticalSignal = blended > 60 ? 'bullish' : blended < 40 ? 'bearish' : 'neutral';
@@ -308,16 +317,21 @@ Return JSON:
       console.error('[Stats] Statistical analysis error:', statsErr);
     }
 
-    // ── Step 3: Vedic Astrology (45% weight) ─────────────────────────────
-    const astroPrediction = !useAstro ? null : await astrologyService
-      .generateAstroPrediction(symbol, targetDate, currentPrice, 'stock', profile.factorWeights)
-      .catch(() => null);
+    };
+
+    let astroPrediction: Awaited<ReturnType<typeof astrologyService.generateAstroPrediction>> | null = null;
+    const runAstro = async () => {
+      astroPrediction = !useAstro ? null : await astrologyService
+        .generateAstroPrediction(symbol, targetDate, currentPrice, 'stock', profile.factorWeights)
+        .catch(() => null);
+    };
 
     // ── Step 4: Advanced astrology (D-10, Sector, Transits, Yogas) ───────
     let advancedAstroResult: any = null;
     let yogaBonus    = 0;
     let transitImpact = 0;
 
+    const runAdvanced = async () => {
     try {
       if (!useAstro) throw new Error('astrology switched off');
       advancedAstroResult = await advancedAstrologyService.analyzeStockBySector(symbol, sector, targetDate);
@@ -340,6 +354,18 @@ Return JSON:
     } catch (advErr) {
       if (useAstro) console.error('[AdvAstro] Non-fatal error:', advErr);
     }
+
+    };
+
+    // Statistics, astrology and advanced astrology do not depend on each other: run them side by side (the market-data fetch
+    // inside the statistics step no longer makes the astrology wait).
+    await Promise.all([runStats(), runAstro(), runAdvanced()]);
+    // (values were assigned inside the parallel steps — tell the compiler to forget the initial `null`)
+    statsResult = statsResult as StatisticalAnalysisResult | null;
+    longTermStats = longTermStats as LongTermStats | null;
+    shortSignal = shortSignal as Direction | null;
+    marketContext = marketContext as Awaited<ReturnType<typeof getMarketContext>>;
+    astroPrediction = astroPrediction as Awaited<ReturnType<typeof astrologyService.generateAstroPrediction>> | null;
 
     // ── Step 5: AI interprets statistics ─────────────────────────────────
     let aiStatsAnalysis: any = null;
@@ -366,7 +392,7 @@ Return JSON:
         const pers = await feedbackLearningService.getUserPersonalization(userId);
         finalPrediction.userPersonalization = pers;
         if (finalPrediction.combinedConfidence !== undefined) {
-          finalPrediction.combinedConfidence = Math.min(95,
+          finalPrediction.combinedConfidence = Math.min(85,
             finalPrediction.combinedConfidence + (pers.personalizedConfidenceBoost || 0)
           );
         }
@@ -382,7 +408,8 @@ Return JSON:
       sector,
       currentPrice,
       targetDate,
-      maxConfidence: 95,
+      maxConfidence: 85,
+      market: marketContext ? { niftyTrend: marketContext.niftyTrend, niftyReturn63dPct: marketContext.niftyRet63dPct, stockReturn63dPct: marketContext.stockRet63dPct, relativeStrengthPct: marketContext.relStrengthPct, indiaVix: marketContext.vix, vixRegime: marketContext.vixRegime } : null,
       stats: statsResult ? {
         signal:     statsResult.statisticalSignal as Direction,
         score:      statsResult.statisticalScore,
@@ -631,7 +658,7 @@ Return JSON:
     // Conflict penalty: disagreement = -10 confidence
     if (!directionAgreement && statsDir !== 'neutral' && astroDir !== 'neutral') combinedConfidence -= 10;
 
-    combinedConfidence = Math.min(95, Math.max(30, combinedConfidence));
+    combinedConfidence = Math.min(85, Math.max(30, combinedConfidence));
 
     // ── Price targets (blend stats and astro range) ───────────────────────
     const riskMultiplier = finalDirection === 'bullish' ? 0.025
@@ -790,10 +817,12 @@ Return JSON:
       console.error('[Stats] Crypto stats error:', err);
     }
 
-    const astroAnalysis = await astrologyService.getCurrentAstrology(targetDate);
-    const userPers      = await feedbackLearningService.getUserPersonalization(userId).catch(() => null);
     const useAstro      = getRequestOptions().useAstro;
-    const profile0      = await learningService.getProfile(cryptoSymbol, 'Crypto', 'crypto');
+    const [astroAnalysis, userPers, profile0] = await Promise.all([
+      astrologyService.getCurrentAstrology(targetDate),
+      feedbackLearningService.getUserPersonalization(userId).catch(() => null),
+      learningService.getProfile(cryptoSymbol, 'Crypto', 'crypto'),
+    ]);
     const profile       = useAstro ? profile0 : { ...profile0, weights: { statistical: 100, astrological: 0 } };
     const wS = profile.weights.statistical / 100;
     const wA = profile.weights.astrological / 100;

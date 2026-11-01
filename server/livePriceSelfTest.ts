@@ -1,4 +1,5 @@
 import { withLivePrice } from "./aiService";
+import { horizonLtWeight } from "./longTermStatsService";
 let fail = 0; const ok = (n: string, c: boolean) => { console.log(`${c ? "PASS" : "FAIL"}  ${n}`); if (!c) fail++; };
 const DAY = 86400000;
 const hist = [{ date: new Date(Date.now() - 2 * DAY), open: 99, high: 101, low: 98, close: 100, volume: 5 }, { date: new Date(Date.now() - 1 * DAY), open: 100, high: 103, low: 99, close: 102, volume: 5 }];
@@ -11,4 +12,7 @@ const b = withLivePrice(todayBar, 98);
 ok("half-finished today bar is updated, not duplicated", b.length === 1 && b[0].close === 98 && b[0].low === 98 && b[0].high === 104);
 ok("no live price → history unchanged", withLivePrice(hist, 0).length === 2);
 ok("empty history → one live bar", withLivePrice([], 50).length === 1);
+ok("1-day call leans on short-term indicators", horizonLtWeight(0.5, 1) < horizonLtWeight(0.5, 30));
+ok("1-year call leans on the 20-year layer", horizonLtWeight(0.5, 365) > horizonLtWeight(0.5, 30));
+ok("long-term share stays within 25–70%", horizonLtWeight(0.9, 400) === 0.7 && horizonLtWeight(0.1, 1) === 0.25);
 console.log(fail ? `\n${fail} FAILED` : "\nAll live-price checks passed"); process.exit(fail ? 1 : 0);

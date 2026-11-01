@@ -228,3 +228,14 @@ export class LongTermStatsService {
 }
 
 export const longTermStatsService = new LongTermStatsService();
+
+
+/**
+ * Short-term indicators (RSI, MACD, moving averages) say most about the next days; the 20-year analog / seasonality layer
+ * says most about months ahead. Shift the long-term layer's share of the statistics score by the prediction horizon.
+ */
+export function horizonLtWeight(base: number, daysAhead: number): number {
+  const d = Math.max(0, daysAhead);
+  const shift = d <= 2 ? -0.15 : d <= 7 ? -0.08 : d <= 30 ? 0 : d <= 90 ? 0.05 : 0.10;
+  return Math.max(0.25, Math.min(0.7, base + shift));
+}

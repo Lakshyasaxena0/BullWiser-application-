@@ -76,7 +76,11 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  // Built files have content hashes in their names → cache them for a year; index.html must always be re-checked
+  app.use(express.static(distPath, {
+    maxAge: '1y', immutable: true,
+    setHeaders: (res, filePath) => { if (filePath.endsWith('.html') || filePath.endsWith('service-worker.js') || filePath.endsWith('manifest.json')) res.setHeader('Cache-Control', 'no-cache'); },
+  }));
 
   // fall through to index.html if the file doesn't exist
   app.use("*", (_req, res) => {

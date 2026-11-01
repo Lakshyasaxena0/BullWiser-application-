@@ -5,6 +5,8 @@ import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import cron from "node-cron";
+import compression from "compression";
+import { pool } from "./db";
 import { predictionMonitoringService } from "./predictionMonitoringService";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -72,6 +74,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   next();
 });
+app.use(compression());   // smaller pages and API answers → faster on mobile data
 app.use(express.json({ limit: '1mb', verify: (req: any, _res, buf) => { if (req.url?.startsWith('/api/payments/webhook')) req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
 app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
@@ -108,6 +111,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── Routes + server ──────────────────────────────────────────────────────────
 (async () => {
   const server = await registerRoutes(app);
+
+  // Indexes for the queries that run all the time (dashboard, history, cron scoring). Safe to repeat; failures never stop the app.
+  for (const q of [
+    "CREATE INDEX IF NOT EXISTS predictions_user_created_idx ON predictions (user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS predictions_due_idx ON predictions (is_active, target_date)",
+    "CREATE INDEX IF NOT EXISTS feedback_user_idx ON feedback (user_id)",
+  ]) pool.query(q).catch((e: any) => console.error('[DB] index not created:', e?.message || e));
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
