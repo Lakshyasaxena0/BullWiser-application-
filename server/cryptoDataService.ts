@@ -167,6 +167,9 @@ export class CryptoDataService {
     });
   }
 
+  /** A prediction must start from the live price: drop the 1-minute quote cache for this coin. */
+  forgetQuote(symbol: string) { this.cache.delete(`crypto_quote_${symbol.toUpperCase()}`); }
+
   async getCryptoQuote(symbol: string): Promise<CryptoQuote | null> {
     symbol = symbol.toUpperCase();
     const cacheKey = `crypto_quote_${symbol}`;

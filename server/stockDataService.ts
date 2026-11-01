@@ -14,6 +14,7 @@ export interface StockQuote {
   lowPrice: number;
   marketCap?: number;
   previousClose: number;
+  marketState?: string;
   timestamp: Date;
 }
 
@@ -128,6 +129,9 @@ export class StockDataService {
     this.cache.set(key, { data, timestamp: Date.now() });
   }
 
+  /** A prediction must start from the live price: drop the 60-second quote cache for this symbol. */
+  forgetQuote(symbol: string) { this.cache.delete(`nse_quote_${symbol}`); this.cache.delete(`bse_quote_${symbol}`); }
+
   async getNSEQuote(symbol: string): Promise<StockQuote | null> {
     const cacheKey = `nse_quote_${symbol}`;
     if (this.isCacheValid(cacheKey)) return this.getCachedData(cacheKey);
@@ -147,6 +151,7 @@ export class StockDataService {
         lowPrice: data.regularMarketDayLow ?? data.regularMarketPrice,
         marketCap: data.marketCap ?? 0,
         previousClose: data.regularMarketPreviousClose ?? data.regularMarketPrice,
+        marketState: (data as any).marketState,
         timestamp: new Date(),
       };
       this.setCacheData(cacheKey, quote);
@@ -180,6 +185,7 @@ export class StockDataService {
         lowPrice: data.regularMarketDayLow ?? data.regularMarketPrice,
         marketCap: data.marketCap ?? 0,
         previousClose: data.regularMarketPreviousClose ?? data.regularMarketPrice,
+        marketState: (data as any).marketState,
         timestamp: new Date(),
       };
       this.setCacheData(cacheKey, quote);

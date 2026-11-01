@@ -435,7 +435,7 @@ export default function Predictions() {
                         {/* ── Price targets ── */}
                         <div className="grid grid-cols-3 gap-2">
                           <div className="bg-gray-50 rounded-lg p-3 text-center">
-                            <p className="text-xs text-gray-500 mb-1">Current Price</p>
+                            <p className="text-xs text-gray-500 mb-1">{predResult.marketState && predResult.marketState !== "REGULAR" && !predResult.crypto ? "Last traded price (market closed)" : "Live price"}</p>
                             <p className="font-bold text-gray-900 text-lg">{predResult.crypto ? "$" : "₹"}{predResult.currentPrice?.toFixed(2)}</p>
                           </div>
                           <div className="bg-red-50 rounded-lg p-3 text-center">

@@ -119,6 +119,31 @@ const cleanText = (v: any, max: number): string =>
 const cleanList = (v: any, count: number, max: number): string[] =>
   Array.isArray(v) ? v.map(x => cleanText(x, max)).filter(Boolean).slice(0, count) : [];
 
+
+/**
+ * The prediction starts from the LIVE price. Daily history normally ends at yesterday's close (or holds a half-finished
+ * today bar), so the live price is written in as today's bar before any statistics are computed. That way indicators,
+ * volatility and analog forecasts all start from where the stock really is now, not from the previous close.
+ */
+export function withLivePrice(history: any[] | undefined, livePrice: number, utcDays = false): any[] {
+  const bars = Array.isArray(history) ? history.map(b => ({ ...b })) : [];
+  if (!(livePrice > 0)) return bars;
+  const IST = 5.5 * 3600000, DAY = 86400000;
+  const dayOf = (t: number) => Math.floor((t + (utcDays ? 0 : IST)) / DAY);
+  const now = Date.now(), today = dayOf(now);
+  const set = (b: any, isNew: boolean) => {
+    const open = isNew ? livePrice : Number(b.open) || livePrice;
+    const high = Math.max(isNew ? livePrice : Number(b.high) || 0, livePrice);
+    const low = Math.min(isNew ? livePrice : (Number(b.low) > 0 ? Number(b.low) : livePrice), livePrice);
+    Object.assign(b, { open, high, low, close: livePrice, CH_CLOSING_PRICE: livePrice, CH_OPENING_PRICE: open, CH_TRADE_HIGH_PRICE: high, CH_TRADE_LOW_PRICE: low });
+  };
+  const last = bars[bars.length - 1];
+  const lastT = last ? new Date(last.date ?? last.timestamp ?? last.CH_TIMESTAMP).getTime() : NaN;
+  if (last && isFinite(lastT) && dayOf(lastT) === today) set(last, false);
+  else { const nb: any = { date: new Date(now), volume: 0, CH_TOT_TRADED_QTY: 0, CH_TIMESTAMP: new Date(now), timestamp: new Date(now) }; set(nb, true); bars.push(nb); }
+  return bars;
+}
+
 export class AIService {
 
   // ── FINAL STEP: AI studies the statistical AND astrological analyses ─────
@@ -227,6 +252,7 @@ Return JSON:
     historicalData?: any[],
     targetDate:    Date = new Date()
   ): Promise<any> {
+    historicalData = withLivePrice(historicalData, currentPrice);
     console.log(`[Pipeline] Starting prediction for ${symbol} @ ₹${currentPrice} (target ${targetDate.toISOString()})`);
     const sector = getSector(symbol);
 
@@ -726,6 +752,7 @@ Return JSON:
     cryptoQuote?:   any,
     targetDate:     Date = new Date()
   ): Promise<any> {
+    historicalData = withLivePrice(historicalData, currentPrice, true);
     // ── Statistical analysis of crypto historical data ────────────────────
     let statsResult: StatisticalAnalysisResult | null = null;
     try {

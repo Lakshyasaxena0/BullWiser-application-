@@ -293,6 +293,7 @@ export function registerRoutes(app: Express): Server {
       
       console.log(`[Predict] Generating prediction for ${upperSymbol} with target date: ${whenDate.toISOString()}`);
       
+      stockDataService.forgetQuote(upperSymbol);      // always start from the live price, never a cached one
       let realTimeQuote = await stockDataService.getStockQuote(upperSymbol, 'NSE');
       if (!realTimeQuote) {
         console.log(`[Predict] NSE failed for ${upperSymbol}, trying BSE...`);
@@ -369,7 +370,7 @@ export function registerRoutes(app: Express): Server {
       
       const isDevMode = process.env.NODE_ENV === 'development';
       const showAstroDetails = isDevMode && req.user?.role === 'developer';
-      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
+      const finalPrediction = { stock: upperSymbol, when: whenDate.toISOString(), currentPrice, predLow: enhancedPrediction.prediction?.priceTarget?.low || Math.round(currentPrice * (1 - riskMultiplier) * 100) / 100, predHigh: enhancedPrediction.prediction?.priceTarget?.high || Math.round(currentPrice * (1 + riskMultiplier) * 100) / 100, confidence: enhancedPrediction.combinedConfidence || enhancedPrediction.prediction?.confidence || 50, exchange: realTimeQuote.exchange, marketState: (realTimeQuote as any).marketState || null, priceAsOf: new Date().toISOString(), direction: enhancedPrediction.finalDirection || 'neutral', technicalFactors: enhancedPrediction.analysis?.technicalFactors || [], marketSentiment: enhancedPrediction.analysis?.marketSentiment || 'mixed', keyRisks: enhancedPrediction.warnings || enhancedPrediction.analysis?.keyRisks || [], recommendation: enhancedPrediction.aiConclusion?.recommendation || enhancedPrediction.astroRecommendation || enhancedPrediction.analysis?.recommendation || 'Hold and observe', reasoning: enhancedPrediction.reasoning || 'Astrology-based analysis', aiPowered: enhancedPrediction.metadata?.aiEnabled || false, livePriceAvailable: currentPrice > 0, feedbackEnhanced: enhancedPrediction.metadata?.feedbackLearningApplied || false, aiConclusion: enhancedPrediction.aiConclusion || null, learning: enhancedPrediction.learningProfile || null, creditsCharged: req._charge?.amount ?? 0, creditsBalance: req._charge?.balance ?? null, vedic: enhancedPrediction.vedic || null, longTermStats: enhancedPrediction.longTermStats || null, companyName: realTimeQuote.companyName, ...(showAstroDetails && { astroFactors: enhancedPrediction.astroFactors, astroStrength: enhancedPrediction.astroStrength, astroPowered: true }) };
       
       const statisticalReasoning = enhancedPrediction.analysis?.technicalFactors?.length > 0 ? enhancedPrediction.analysis.technicalFactors.join('; ') : 'Standard technical analysis applied';
       const astroReasoning = enhancedPrediction.astroRecommendation || (enhancedPrediction.warnings?.length > 0 ? enhancedPrediction.warnings.join('; ') : null);
@@ -393,6 +394,7 @@ export function registerRoutes(app: Express): Server {
       const userId = req.user.id;
       const prefs = await getUserPrefs(userId);
       enterRequestOptions(prefs);
+      cryptoDataService.forgetQuote(cryptoSymbol);
       const cryptoQuote = await cryptoDataService.getCryptoQuote(cryptoSymbol.toUpperCase());
       if (!cryptoQuote) return res.status(404).json({ message: "Cryptocurrency not found" });
       

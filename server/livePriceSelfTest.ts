@@ -1,0 +1,14 @@
+import { withLivePrice } from "./aiService";
+let fail = 0; const ok = (n: string, c: boolean) => { console.log(`${c ? "PASS" : "FAIL"}  ${n}`); if (!c) fail++; };
+const DAY = 86400000;
+const hist = [{ date: new Date(Date.now() - 2 * DAY), open: 99, high: 101, low: 98, close: 100, volume: 5 }, { date: new Date(Date.now() - 1 * DAY), open: 100, high: 103, low: 99, close: 102, volume: 5 }];
+const a = withLivePrice(hist, 110);
+ok("yesterday-close history gets a new bar for today", a.length === 3);
+ok("last bar close is the live price", a[2].close === 110 && a[2].CH_CLOSING_PRICE === 110);
+ok("original history untouched", hist.length === 2 && hist[1].close === 102);
+const todayBar = [{ date: new Date(), open: 100, high: 104, low: 99, close: 103, volume: 5 }];
+const b = withLivePrice(todayBar, 98);
+ok("half-finished today bar is updated, not duplicated", b.length === 1 && b[0].close === 98 && b[0].low === 98 && b[0].high === 104);
+ok("no live price → history unchanged", withLivePrice(hist, 0).length === 2);
+ok("empty history → one live bar", withLivePrice([], 50).length === 1);
+console.log(fail ? `\n${fail} FAILED` : "\nAll live-price checks passed"); process.exit(fail ? 1 : 0);
