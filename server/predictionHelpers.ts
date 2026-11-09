@@ -1,5 +1,6 @@
 // Shared by the user prediction routes and the automatic practice job, so both build predictions the same way.
 import { astrologyService } from "./astrologyService";
+import { vixRangeFactors } from "./evidenceRules";
 
 /** Keep the stored learning snapshot identical to what the user was shown (the guard may have lowered confidence / downgraded the call). */
 export function syncSnapshot(snapshot: any, direction: string, confidence: number): any {
@@ -61,6 +62,12 @@ export function computePriceRange(currentPrice: number, enhanced: any, riskMulti
     low = currentPrice * (1 - v); high = currentPrice * (1 + v);
   } else {
     low = currentPrice * (1 - riskMultiplier * k); high = currentPrice * (1 + riskMultiplier * k);
+  }
+  // Nervous market (India VIX) → wider range, extra room on the downside (volatility rises most when prices fall)
+  const vf = vixRangeFactors(enhanced?.marketContext?.vixRegime);
+  if (vf.widen !== 1 || vf.downExtra > 0) {
+    const centre = (low + high) / 2, hl = centre - low, hh = high - centre;
+    low = centre - hl * vf.widen * (1 + vf.downExtra); high = centre + hh * vf.widen;
   }
   low = Math.max(currentPrice * 0.01, low);
   if (high <= low) high = low * 1.001;

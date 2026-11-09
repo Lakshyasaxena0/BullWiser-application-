@@ -11,6 +11,7 @@ import { stockDataService }          from './stockDataService';
 import { feedbackLearningService, NEUTRAL_LEARNING_ADJUSTMENT } from './feedbackLearningService';
 import { astrologyService }          from './astrologyService';
 import { longTermStatsService, LongTermStats, LONG_TERM_DAYS, horizonLtWeight } from './longTermStatsService';
+import { astroAgreementBonus } from './evidenceRules';
 import { getMarketContext } from './marketContextService';
 import { getRequestOptions } from './requestOptions';
 import { advancedAstrologyService }  from './advancedAstrologyService';
@@ -164,6 +165,7 @@ Rules:
 - Use only the data provided. Never invent prices, news or indicators.
 - The LEARNED TRACK RECORD below says how reliable each source has actually been on past, scored predictions. Use its weighting as your starting point (stay within ~10 points of it). With no track record, use the house ratio 55% statistics / 45% astrology (stay within ~5 points). Shift further only if one side is neutral or missing, and reflect that in the weighting numbers.
 - Match the evidence to the horizon: for 1-7 days lean on the short-term indicators (RSI, MACD, moving averages, support/resistance); for 1 month or more lean on the 20-year analog forecast, seasonality and the long-run profile. Astrology is a timing/sentiment layer, not a price model.
+- Evidence notes (from the research literature and practitioners): next-day and next-week direction is close to a coin flip, so keep confidence modest for short horizons; momentum persists for months but one-month moves often reverse unless the stock is near its 52-week high on strong volume; month-of-year patterns on the Nifty are unstable (a tie-breaker at most); astrology's measurable effect on prices is very small, so let the learned track record, not the story, decide how much it counts; a wide, honest price range beats a falsely precise one.
 - Respect the market backdrop: a falling Nifty or high India VIX lowers confidence in bullish calls; a stock far weaker than the Nifty is a warning even when indicators look fine.
 - If a source has a poor track record, say so and lean on the other one.
 - If the two sides disagree, say so plainly and lower confidence instead of hiding the conflict.
@@ -653,8 +655,9 @@ Return JSON:
       (learningAdjustment.confidenceAdjustment ?? 0)
     );
 
-    // Agreement bonus: both agree = +8 confidence
-    if (directionAgreement && statsDir !== 'neutral') combinedConfidence += 8;
+    // Agreement bonus: both agree = up to +8 confidence. Astrology's measurable edge in published studies is tiny, so the
+    // bonus shrinks as the learned track record demotes it (full bonus only while its weight is intact).
+    if (directionAgreement && statsDir !== 'neutral') combinedConfidence += astroAgreementBonus(wA);
     // Conflict penalty: disagreement = -10 confidence
     if (!directionAgreement && statsDir !== 'neutral' && astroDir !== 'neutral') combinedConfidence -= 10;
 

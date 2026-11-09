@@ -16,7 +16,7 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "test": "npm run test:all",
-    "test:all": "npm run test:vedic && npm run test:stats && npm run test:weights && npm run test:learning && npm run test:credits && npm run test:outlook && npm run test:performance && npm run test:cron && npm run test:live && npm run test:guard && npm run test:practice",
+    "test:all": "npm run test:vedic && npm run test:stats && npm run test:weights && npm run test:learning && npm run test:credits && npm run test:outlook && npm run test:performance && npm run test:cron && npm run test:live && npm run test:guard && npm run test:practice && npm run test:evidence",
     "test:vedic": "tsx server/vedic/selfTest.ts",
     "test:stats": "tsx server/longTermSelfTest.ts",
     "test:weights": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/weightsSelfTest.ts",
@@ -27,7 +27,8 @@
     "test:live": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/livePriceSelfTest.ts",
     "test:guard": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/guardSelfTest.ts",
     "test:performance": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/performanceSelfTest.ts",
-    "test:practice": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/practiceSelfTest.ts"
+    "test:practice": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/practiceSelfTest.ts",
+    "test:evidence": "DATABASE_URL=${DATABASE_URL:-postgresql://x:x@localhost:5432/x} tsx server/evidenceSelfTest.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

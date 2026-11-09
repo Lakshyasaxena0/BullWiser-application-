@@ -182,7 +182,7 @@ export async function practiceStats() {
          FROM predictions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20000`, [userId]);
     const s = summarizePerformance(r.rows);
     return {
-      made: r.rows.length, scored: s.scored, correct: s.correct, accuracyPct: s.accuracyPct, waitingForResult: s.pending,
+      made: r.rows.length, scored: s.scored, correct: s.correct, accuracyPct: s.accuracyPct, baselinePct: s.baselinePct, edgePct: s.edgePct, waitingForResult: s.pending,
       byMarket: s.byMarket, lastMadeAt: r.rows[0]?.createdAt ?? null, lastRun,
       watching: { stocks: practiceStocks().length, crypto: practiceCrypto().length },
     };

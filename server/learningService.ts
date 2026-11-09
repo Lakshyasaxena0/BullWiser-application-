@@ -20,6 +20,7 @@
 
 import { db } from './db';
 import { predictions } from '@shared/schema';
+import { uniquenessWeight } from './evidenceRules';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 
 export type Dir = 'bullish' | 'bearish' | 'neutral';
@@ -90,7 +91,7 @@ const HALF_LIFE_DAYS = 60;         // older outcomes count less
 const CACHE_MS = 5 * 60_000;
 const MAX_RECORDS = 1500;
 
-export interface Rec { snap: LearningSnapshot; w: number; sector: string; symbol: string; market: Market }
+export interface Rec { snap: LearningSnapshot; w: number; sector: string; symbol: string; market: Market; u?: number /* uniqueness weight, see evidenceRules.ts */ }
 
 let cache: { at: number; recs: Rec[] } | null = null;
 
@@ -186,20 +187,34 @@ async function loadRecords(): Promise<Rec[]> {
     const ageDays = Math.max(0, (now - t) / 86_400_000);
     recs.push({ snap, w: Math.pow(0.5, ageDays / HALF_LIFE_DAYS), sector: snap.sector, symbol: snap.symbol, market: snap.market });
   }
+  applyUniqueness(recs);
   cache = { at: now, recs };
+  return recs;
+}
+
+/**
+ * Outcomes scored on the same day in the same market share one market move, so they are not independent evidence.
+ * Down-weights each such group (3 count fully, 25 count like ~9) so a single market day cannot swing the learned weights.
+ * Mutates the records (w and u). Exported for tests.
+ */
+export function applyUniqueness(recs: Rec[]): Rec[] {
+  const day = (r: Rec) => `${r.market}|${(r.snap.outcome?.scoredAt ?? '').slice(0, 10)}`;
+  const count = new Map<string, number>();
+  for (const r of recs) count.set(day(r), (count.get(day(r)) ?? 0) + 1);
+  for (const r of recs) { const u = uniquenessWeight(count.get(day(r)) ?? 1); r.u = u; r.w *= u; }
   return recs;
 }
 
 export function invalidateLearningCache() { cache = null; }
 
-interface Agg { n: number; statsN: number; astroN: number; sHit: number; aHit: number; fHit: number; fN: number; confSum: number; hitSum: number; wSum: number }
-const emptyAgg = (): Agg => ({ n: 0, statsN: 0, astroN: 0, sHit: 0, aHit: 0, fHit: 0, fN: 0, confSum: 0, hitSum: 0, wSum: 0 });
+interface Agg { nEff: number; n: number; statsN: number; astroN: number; sHit: number; aHit: number; fHit: number; fN: number; confSum: number; hitSum: number; wSum: number }
+const emptyAgg = (): Agg => ({ nEff: 0, n: 0, statsN: 0, astroN: 0, sHit: 0, aHit: 0, fHit: 0, fN: 0, confSum: 0, hitSum: 0, wSum: 0 });
 
 function aggregate(recs: Rec[]): Agg {
   const g = emptyAgg();
-  for (const { snap, w } of recs) {
+  for (const { snap, w, u } of recs) {
     const o = snap.outcome!;
-    g.n++;
+    g.n++; g.nEff += u ?? 1;
     g.wSum += w;
     g.fN += w; g.fHit += o.finalCorrect ? w : 0;
     g.confSum += snap.confidence * w; g.hitSum += (o.finalCorrect ? 100 : 0) * w;
@@ -236,7 +251,7 @@ export function computeProfile(records: Rec[], symbol: string, sector: string, m
     const all = records.filter(r => r.market === market);
     const sym = symbol.toUpperCase();
     const gAgg = aggregate(all);
-    if (gAgg.n < MIN_OUTCOMES_TO_TRUST) {
+    if (gAgg.nEff < MIN_OUTCOMES_TO_TRUST) {
       return { ...DEFAULT_PROFILE, samples: { symbol: 0, sector: 0, global: gAgg.n },
         summary: `Only ${gAgg.n} scored prediction${gAgg.n === 1 ? '' : 's'} so far — not enough to adjust the standard 55/45 weighting.` };
     }
@@ -257,14 +272,14 @@ export function computeProfile(records: Rec[], symbol: string, sector: string, m
     // Weights: share of reliability, kept inside 40–70 so neither source is ever ignored.
     // Start from the 55/45 house ratio and move toward the evidence only as fast as the sample size justifies.
     const raw = rStats.blended / (rStats.blended + rAstro.blended);
-    const trust = gAgg.n / (gAgg.n + 30);
+    const trust = gAgg.nEff / (gAgg.nEff + 30);   // independent evidence, not raw counts
     const wS = Math.min(0.70, Math.max(0.40, BASE_STAT / 100 + (raw - 0.5) * trust));
     const statistical = Math.round(wS * 100);
 
     // Confidence calibration: stated confidence vs real hit-rate (market-wide → sector → symbol).
     const gap = (a: Agg) => (a.wSum > 0 ? a.hitSum / a.wSum - a.confSum / a.wSum : 0);
-    const gapBlend = blend(gap(gAgg), sAgg.n >= 3 ? gap(sAgg) : null, sAgg.n, yAgg.n >= 3 ? gap(yAgg) : null, yAgg.n);
-    const shrink = gAgg.n / (gAgg.n + 15);
+    const gapBlend = blend(gap(gAgg), sAgg.n >= 3 ? gap(sAgg) : null, sAgg.nEff, yAgg.n >= 3 ? gap(yAgg) : null, yAgg.nEff);
+    const shrink = gAgg.nEff / (gAgg.nEff + 15);
     const confidenceAdjustment = Math.max(-15, Math.min(10, Math.round(gapBlend * shrink)));
 
     // Per-direction hit-rate of the final call (market-wide)

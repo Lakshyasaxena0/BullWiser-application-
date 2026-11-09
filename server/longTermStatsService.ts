@@ -9,6 +9,7 @@
 //   • walk-forward backtest of this very rule, so the app reports its own historical hit-rate
 // ─────────────────────────────────────────────────────────────────────────────
 import type { OHLCVBar } from './statisticalAnalysisService';
+import { SEASONALITY_MIN_YEARS, SEASONALITY_SCORE_POINTS } from './evidenceRules';
 
 export const LONG_TERM_YEARS = 20;
 export const LONG_TERM_DAYS = Math.ceil(LONG_TERM_YEARS * 365.25) + 10;
@@ -167,7 +168,7 @@ export class LongTermStatsService {
       let s = 50 + 60 * (pUp - 0.5);
       s += ab ? (rs ? 8 : 4) : (rs ? -3 : -8);
       if (mom !== null) s += mom > 0.1 ? 6 : mom < -0.1 ? -6 : 0;
-      if (sN >= 8) s += sMonthAvg > 0 && sWin >= 55 ? 4 : sMonthAvg < 0 && sWin <= 45 ? -4 : 0;
+      if (sN >= SEASONALITY_MIN_YEARS) s += sMonthAvg > 0 && sWin >= 55 ? SEASONALITY_SCORE_POINTS : sMonthAvg < 0 && sWin <= 45 ? -SEASONALITY_SCORE_POINTS : 0;   // month effects are unstable in India: small say, long history only
       return Math.max(5, Math.min(95, s));
     };
     const score = scoreFor(probUp, above, rising, mom12_1, mean(tm), seas.monthlyWinRatePct, tm.length);

@@ -8,7 +8,9 @@ ok("empty range rejected", !guardPrediction({ ...base, low: 106, high: 106 }).ok
 ok("absurdly wide 1-day range rejected", !guardPrediction({ ...base, low: 50, high: 160, daysAhead: 1 }).ok);
 ok("same range is fine for a 1-year horizon", guardPrediction({ ...base, low: 60, high: 150, daysAhead: 365 }).ok);
 ok("range far from live price rejected", !guardPrediction({ ...base, low: 300, high: 320 }).ok);
-ok("confidence capped at 85", guardPrediction({ ...base, confidence: 99 }).confidence === 85);
+ok("confidence capped by horizon: 30 days → 74", guardPrediction({ ...base, confidence: 99 }).confidence === 74);
+ok("…1 day → 66, with an explanatory note", (() => { const g = guardPrediction({ ...base, daysAhead: 1, confidence: 90 }); return g.confidence === 66 && g.notes.length === 1; })());
+ok("…crypto 1 day → 62, 3 years → 80 (stock)", guardPrediction({ ...base, daysAhead: 1, crypto: true, high: 108, confidence: 90 }).confidence === 62 && guardPrediction({ ...base, daysAhead: 1000, low: 60, high: 150, confidence: 95 }).confidence === 80);
 ok("confidence floored at 20", guardPrediction({ ...base, confidence: 3 }).confidence === 20);
 ok("bullish call with a clearly lower range → neutral", (() => { const g = guardPrediction({ ...base, low: 90, high: 96 }); return g.ok && g.direction === "neutral" && g.notes.length === 1; })());
 ok("bearish call with a clearly higher range → neutral", guardPrediction({ ...base, direction: "bearish", low: 106, high: 114 }).direction === "neutral");

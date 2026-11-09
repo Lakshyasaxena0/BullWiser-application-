@@ -27,7 +27,7 @@ export default function SelfLearningCard() {
             <p className="text-sm font-semibold">Self-practice</p>
             <p className="text-xs text-gray-600">
               Every hour BullWiser also makes its own predictions on {data.practice.watching.stocks} stocks and {data.practice.watching.crypto} coins (while the market is open for stocks) and checks them against the real price.
-              So far: {data.practice.made} made · {data.practice.scored} checked{data.practice.accuracyPct !== null && <> · {data.practice.accuracyPct}% direction right</>} · {data.practice.waitingForResult} waiting for their result.
+              So far: {data.practice.made} made · {data.practice.scored} checked{data.practice.accuracyPct !== null && <> · {data.practice.accuracyPct}% direction right{data.practice.baselinePct !== null && <> (always guessing the most common outcome would score {data.practice.baselinePct}%, so the real edge is {data.practice.edgePct > 0 ? '+' : ''}{data.practice.edgePct} points)</>}</>} · {data.practice.waitingForResult} waiting for their result.
             </p>
           </div>
         )}

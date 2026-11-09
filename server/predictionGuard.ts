@@ -1,3 +1,5 @@
+import { confidenceCeiling } from "./evidenceRules";
+
 // Last line of defence before a prediction is shown or saved. A prediction that fails these basic sanity rules is
 // never returned (the route refunds the credits instead) — a missing answer is better than a wrong-looking one.
 export interface GuardInput { currentPrice: number; low: number; high: number; confidence: number; direction: string; daysAhead: number; crypto: boolean }
@@ -22,8 +24,12 @@ export function guardPrediction(i: GuardInput): GuardResult {
 
   let direction = i.direction;
   let confidence = fin(i.confidence) ? i.confidence : 50;
-  // nobody can be near-certain about a market: keep stated confidence in an honest band
-  confidence = Math.max(20, Math.min(85, Math.round(confidence)));
+  // nobody can be near-certain about a market, and the nearer the target the closer a call is to a coin flip:
+  // stated confidence is held inside an honest band that depends on the horizon (see evidenceRules.ts)
+  const ceiling = confidenceCeiling(i.daysAhead, i.crypto);
+  const wanted = Math.round(confidence);
+  confidence = Math.max(20, Math.min(ceiling, wanted));
+  if (wanted > ceiling) notes.push(`Confidence is held at ${ceiling}% at most for a ${i.daysAhead <= 1 ? "1-day" : i.daysAhead + "-day"} call — markets are never certain.`);
   // direction and range must tell the same story
   const midMove = ((i.low + i.high) / 2 - i.currentPrice) / i.currentPrice;
   const tol = Math.max(0.01, width * 0.15);

@@ -5,6 +5,8 @@
 // Momentum, Volatility, Beta, Trend Strength — all from raw historical price data.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { shortTermPressure, type ShortTermInput } from './evidenceRules';
+
 export interface OHLCVBar {
   date:   Date;
   open:   number;
@@ -150,8 +152,18 @@ export class StatisticalAnalysisService {
     const volatility        = this.calcVolatility(closes, highs, lows, current);
     const trendStrength     = this.calcTrendStrength(highs, lows, closes);
 
+    // Context for the one-month momentum/reversal rule: 1-month return, price vs 52-week high, volume vs its 6-month norm
+    const n = closes.length;
+    const r1mPct = n > 21 && closes[n - 22] > 0 ? (current / closes[n - 22] - 1) * 100 : null;
+    const hi52 = n >= 60 ? Math.max(...closes.slice(-252)) : 0;
+    const pth = hi52 > 0 ? current / hi52 : null;
+    const avgVol = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+    const v6 = avgVol(volumes.slice(-126)), v1 = avgVol(volumes.slice(-21));
+    const turnoverRatio = n >= 60 && v6 > 0 ? v1 / v6 : null;
+
     const { score, confidence, keyFindings, keyRisks } = this.buildCompositeScore(
-      rsi, macd, bollingerBands, movingAverages, volume, momentum, trendStrength, volatility, current, supportResistance
+      rsi, macd, bollingerBands, movingAverages, volume, momentum, trendStrength, volatility, current, supportResistance,
+      { r1mPct, pth, turnoverRatio }
     );
 
     const signal: 'bullish' | 'bearish' | 'neutral' =
@@ -516,7 +528,8 @@ export class StatisticalAnalysisService {
     rsi: RSIResult, macd: MACDResult, bb: BollingerBands,
     ma: MovingAverages, vol: VolumeAnalysis, mom: MomentumIndicators,
     trend: TrendStrength, volatility: VolatilityMetrics, current: number,
-    sr: SupportResistance
+    sr: SupportResistance,
+    st: ShortTermInput = { r1mPct: null, pth: null, turnoverRatio: null }
   ) {
     const keyFindings: string[] = [];
     const keyRisks:    string[] = [];
@@ -558,8 +571,9 @@ export class StatisticalAnalysisService {
 
     // ── Momentum contribution (weight 10%) ──
     let momScore = 50;
-    if (mom.roc10 > 5)   { momScore = 70; keyFindings.push(`Strong 10-day momentum: +${mom.roc10.toFixed(1)}%`); }
-    if (mom.roc10 < -5)  { momScore = 30; keyRisks.push(`Weak 10-day momentum: ${mom.roc10.toFixed(1)}%`); }
+    // One-month moves: continue near the 52-week high on strong volume, reverse when thin / far from the high (see evidenceRules.ts)
+    const pressure = shortTermPressure(st);
+    if (pressure.note) { momScore = pressure.score; (pressure.score >= 50 ? keyFindings : keyRisks).push(pressure.note); }
     if (mom.stochK < 20) { momScore = Math.min(80, momScore + 10); keyFindings.push('Stochastic oversold — potential bounce'); }
     if (mom.stochK > 80) { momScore = Math.max(20, momScore - 10); keyRisks.push('Stochastic overbought'); }
 

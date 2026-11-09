@@ -13,6 +13,8 @@ export interface PerfSummary {
   rangeHitPct: number | null; pending: number; avgConfidence: number | null;
   byMarket: { stock: { scored: number; correct: number; accuracyPct: number | null }; crypto: { scored: number; correct: number; accuracyPct: number | null } };
   statisticsAccuracyPct: number | null; astrologyAccuracyPct: number | null;
+  /** Hit-rate of the laziest strategy: always guess the outcome that happened most often. The model only has an edge above this. */
+  baselinePct: number | null; edgePct: number | null;
   recent: { symbol: string; predicted: string; actual: string; changePct: number; correct: boolean; at: string | null }[];
 }
 const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null);
@@ -22,6 +24,7 @@ export function summarizePerformance(rows: PerfRow[]): PerfSummary {
   let scored = 0, correct = 0, inRange = 0, inRangeN = 0, pending = 0, conf = 0;
   const mk = { stock: { n: 0, c: 0 }, crypto: { n: 0, c: 0 } };
   let sN = 0, sC = 0, aN = 0, aC = 0;
+  const actualDirs: Record<string, number> = {};
   const recent: PerfSummary["recent"] = [];
   for (const r of rows) {
     if (r.isActive && r.actualPrice == null) { pending++; continue; }
@@ -29,6 +32,7 @@ export function summarizePerformance(rows: PerfRow[]): PerfSummary {
     const o = snap?.outcome;
     if (!snap || !o) continue;                       // not scored (no snapshot / not yet compared with real price)
     scored++; conf += Number(r.confidence) || 0;
+    actualDirs[o.actualDirection] = (actualDirs[o.actualDirection] ?? 0) + 1;
     if (o.finalCorrect) correct++;
     const m = snap.market === "crypto" ? mk.crypto : mk.stock; m.n++; if (o.finalCorrect) m.c++;
     if (o.inRange != null) { inRangeN++; if (o.inRange) inRange++; }
@@ -42,6 +46,8 @@ export function summarizePerformance(rows: PerfRow[]): PerfSummary {
     avgConfidence: scored ? Math.round(conf / scored) : null,
     byMarket: { stock: { scored: mk.stock.n, correct: mk.stock.c, accuracyPct: pct(mk.stock.c, mk.stock.n) }, crypto: { scored: mk.crypto.n, correct: mk.crypto.c, accuracyPct: pct(mk.crypto.c, mk.crypto.n) } },
     statisticsAccuracyPct: pct(sC, sN), astrologyAccuracyPct: pct(aC, aN),
+    baselinePct: scored ? pct(Math.max(0, ...Object.values(actualDirs)), scored) : null,
+    edgePct: scored ? Math.round((pct(correct, scored)! - pct(Math.max(0, ...Object.values(actualDirs)), scored)!) * 10) / 10 : null,
     recent: recent.slice(0, 8),
   };
 }
