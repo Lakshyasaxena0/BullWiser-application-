@@ -468,7 +468,7 @@ export default function PredictionAnalytics() {
           <p className="text-xs text-amber-800">
             <strong>Note:</strong> A prediction is marked "right" when the direction it called (up / down / flat) matched what the
             real price did by the target date. "Inside range" is a separate check: did the real price land between the predicted low and high.
-            Results fill in automatically after each target date (every 2 hours), or press Refresh to check now.
+            Results fill in automatically after each target date (every hour), or press Refresh to check now.
           </p>
         </CardContent>
       </Card>

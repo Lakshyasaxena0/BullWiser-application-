@@ -8,6 +8,7 @@ import cron from "node-cron";
 import compression from "compression";
 import { pool } from "./db";
 import { predictionMonitoringService } from "./predictionMonitoringService";
+import { runPracticeCycle } from "./practiceService";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -77,7 +78,20 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use(compression());   // smaller pages and API answers → faster on mobile data
 app.use(express.json({ limit: '1mb', verify: (req: any, _res, buf) => { if (req.url?.startsWith('/api/payments/webhook')) req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: false }));
-app.get('/api/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+// Health check for Render and UptimeRobot. It also runs a tiny database query (at most once every 20 s), so every
+// ping keeps the Supabase database awake (free projects pause after a week without activity).
+// Always answers 200 while the server is up; "db" says whether the database answered (use an UptimeRobot
+// "keyword" monitor for "db":"ok" to be alerted when the database is down).
+let healthCache = { at: 0, db: 'unknown' as 'ok' | 'down' | 'unknown' };
+app.get('/api/health', async (_req, res) => {
+  if (Date.now() - healthCache.at > 20_000) {
+    try {
+      await Promise.race([pool.query('SELECT 1'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
+      healthCache = { at: Date.now(), db: 'ok' };
+    } catch { healthCache = { at: Date.now(), db: 'down' }; }
+  }
+  res.json({ ok: true, db: healthCache.db, time: new Date().toISOString() });
+});
 
 // ─── Request logger ───────────────────────────────────────────────────────────
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -143,45 +157,28 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     }
   }
 
-  // ─── CRON JOB: Prediction Monitoring ────────────────────────────────────────
-  // ★★★ UPDATED: Now runs every 2 hours (12 times per day) ★★★
-  // 
-  // Schedule: '0 */2 * * *'
-  //   - Minute: 0 (top of the hour)
-  //   - Hour: Every 2 hours (0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22)
-  //   - Day: Every day
-  // 
-  // Execution times: 12:00 AM, 2:00 AM, 4:00 AM, 6:00 AM, 8:00 AM, 10:00 AM,
-  //                  12:00 PM, 2:00 PM, 4:00 PM, 6:00 PM, 8:00 PM, 10:00 PM
-  // 
-  // Previous schedule: '0 0 * * *' (once daily at midnight)
-  // ─────────────────────────────────────────────────────────────────────────────
-  let monitoringRunning = false; // never let two runs overlap if one is slow
-  cron.schedule('0 */2 * * *', async () => {
-    if (monitoringRunning) { log('⏭️ [Cron] Previous monitoring run still going — skipping this one'); return; }
-    monitoringRunning = true;
+  // ─── HOURLY CYCLE: check results, then practise ────────────────────────────
+  // Every hour, on the hour:
+  //   1. CHECK    – every prediction whose target time has passed is compared with the REAL price
+  //                 (users' predictions and the app's own practice ones) and the learning profile is rebuilt.
+  //   2. PRACTISE – the app makes a new batch of predictions on its own (see practiceService.ts), so it keeps
+  //                 learning even when nobody is using it.
+  // Free hosting sleeps, so the same cycle also runs 90 seconds after every start to catch up on anything missed.
+  let cycleRunning = false; // never let two cycles overlap if one is slow
+  const runHourlyCycle = async (label: string) => {
+    if (cycleRunning) { log(`⏭️ [${label}] Previous cycle still running — skipping`); return; }
+    cycleRunning = true;
     const now = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true });
-    log(`🔄 [Cron] Starting prediction monitoring at ${now}...`);
-    try {
-      await predictionMonitoringService.monitorDuePredictions();
-      log('✅ [Cron] Prediction monitoring completed successfully');
-    } catch (error) {
-      log('❌ [Cron] Prediction monitoring failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
-      console.error('[Cron] Full error:', error);
-    } finally {
-      monitoringRunning = false;
-    }
-  });
-
-  log('⏰ Prediction monitoring cron job scheduled (every 2 hours, 12 times per day)');
-  // Free hosting sleeps, so cron ticks can be missed: also check everything that fell due while the server was asleep.
-  setTimeout(async () => {
-    if (monitoringRunning) return;
-    monitoringRunning = true;
-    try { await predictionMonitoringService.monitorDuePredictions(); log('✅ [Startup] Caught up on due predictions'); }
-    catch (e) { console.error('[Startup] catch-up failed:', e); }
-    finally { monitoringRunning = false; }
-  }, 90_000);
+    log(`🔄 [${label}] Starting at ${now} IST — checking results, then practising...`);
+    try { await predictionMonitoringService.monitorDuePredictions(); log(`✅ [${label}] Result check completed`); }
+    catch (error) { log(`❌ [${label}] Result check failed: ` + (error instanceof Error ? error.message : 'Unknown error')); console.error(error); }
+    try { await runPracticeCycle(); }
+    catch (error) { log(`❌ [${label}] Practice run failed: ` + (error instanceof Error ? error.message : 'Unknown error')); console.error(error); }
+    finally { cycleRunning = false; }
+  };
+  cron.schedule('0 * * * *', () => { void runHourlyCycle('Cron'); });
+  log('⏰ Hourly cycle scheduled (every hour: check results against real prices, then practise new predictions)');
+  setTimeout(() => { void runHourlyCycle('Startup'); }, 90_000);
   // ─────────────────────────────────────────────────────────────────────────────
 
   const port = parseInt(process.env.PORT || "5000", 10);

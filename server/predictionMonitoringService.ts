@@ -17,6 +17,7 @@ import { cryptoDataService } from "./cryptoDataService";
 import { aiAstrologyTrainer } from "./aiAstrologyTrainer";
 import { learningService, getProfile, parseSnapshot } from "./learningService";
 import { notifyPredictionResult } from "./userSettings";
+import { isPracticeUser } from "./practiceUser";
 
 interface PredictionResult {
   predictionId: number;
@@ -187,7 +188,8 @@ export class PredictionMonitoringService {
 
       const snap = parseSnapshot(scored.aiLearning);
       if (snap?.outcome) {
-        void notifyPredictionResult(prediction.userId, { symbol, predicted: snap.finalDirection, actual: snap.outcome.actualDirection, changePct: snap.outcome.changePct, correct: snap.outcome.finalCorrect });
+        // the app's own practice predictions are only for learning: nobody to notify
+        if (!(await isPracticeUser(prediction.userId))) void notifyPredictionResult(prediction.userId, { symbol, predicted: snap.finalDirection, actual: snap.outcome.actualDirection, changePct: snap.outcome.changePct, correct: snap.outcome.finalCorrect });
         console.log(`[Monitor] ${symbol}: final ${snap.finalDirection} vs actual ${snap.outcome.actualDirection} (${snap.outcome.changePct}%) — stats ${snap.outcome.statsCorrect}, astro ${snap.outcome.astroCorrect}`);
       }
 

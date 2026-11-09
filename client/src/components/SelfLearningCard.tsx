@@ -22,6 +22,15 @@ export default function SelfLearningCard() {
       <CardHeader className="pb-2"><CardTitle className="text-base">🧠 Self-learning report</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-gray-600">Every {data.checkedEvery} the system compares each past prediction with the real price, then adjusts its own weights, confidence and price ranges. Starting ratio: {data.baseRatio}.</p>
+        {data.practice && (
+          <div className="p-3 bg-blue-50 rounded-lg space-y-1" data-testid="learning-practice">
+            <p className="text-sm font-semibold">Self-practice</p>
+            <p className="text-xs text-gray-600">
+              Every hour BullWiser also makes its own predictions on {data.practice.watching.stocks} stocks and {data.practice.watching.crypto} coins (while the market is open for stocks) and checks them against the real price.
+              So far: {data.practice.made} made · {data.practice.scored} checked{data.practice.accuracyPct !== null && <> · {data.practice.accuracyPct}% direction right</>} · {data.practice.waitingForResult} waiting for their result.
+            </p>
+          </div>
+        )}
         <div className="grid md:grid-cols-2 gap-3">{block("Stocks", data.stock)}{block("Crypto", data.crypto)}</div>
       </CardContent>
     </Card>

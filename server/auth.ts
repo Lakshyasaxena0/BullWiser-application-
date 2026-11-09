@@ -131,6 +131,7 @@ export function setupAuth(app: Express) {
         return res.status(400).json({ message: "A valid email address is required (used to reset your password)" });
       }
 
+      if (username.toLowerCase().startsWith("bullwiser-practice")) return res.status(400).json({ message: "This username is reserved. Please choose another." });
       const existing = await storage.getUserByUsername(username);
       if (existing) {
         return res.status(400).json({ message: "Username already exists" });
